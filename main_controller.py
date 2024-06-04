@@ -3,6 +3,7 @@ import certifi
 import torch
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
+from torch import nn, optim
 from torch.utils.data import DataLoader
 from stitching_layer import StitchingModel
 from dotenv import load_dotenv, find_dotenv
@@ -33,32 +34,79 @@ def load_dataset(batch_size=64):
         download=True,
         transform=transform,
     )
+    cifar10_test = datasets.CIFAR10(
+        root=os.path.join(os.getenv("DATA_DIR", "data"), "cifar10"),
+        train=False,
+        download=True,
+        transform=transform,
+    )
 
     train_loader = DataLoader(cifar10_train, batch_size=batch_size, shuffle=True)
-    return train_loader
+    test_loader = DataLoader(cifar10_test, batch_size=batch_size, shuffle=False)
+    return train_loader, test_loader
+
+
+def train(model, train_loader, criterion, optimizer, num_epochs=10):
+    model.train()
+    for epoch in range(num_epochs):
+        running_loss = 0.0
+        for images, labels in train_loader:
+            optimizer.zero_grad()
+            outputs = model.forward(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+        print(
+            f"Epoch [{epoch + 1}/{num_epochs}], Loss: {running_loss / len(train_loader)}"
+        )
+
+
+def test(model, test_loader, criterion):
+    model.eval()
+    total = 0
+    correct = 0
+    test_loss = 0.0
+    with torch.no_grad():
+        for images, labels in test_loader:
+            outputs = model.forward(images)
+            loss = criterion(outputs, labels)
+            test_loss += loss.item()
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    print(
+        f"Test Loss: {test_loss / len(test_loader)}, Accuracy: {100 * correct / total}%"
+    )
 
 
 def main():
-    train_loader = load_dataset()
-
-    images, labels = next(iter(train_loader))
+    train_loader, test_loader = load_dataset()
 
     stitching_model = StitchingModel("resnet18", "resnet34", 5, 5)
 
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(stitching_model.parameters(), lr=0.001)
+
+    train(stitching_model, train_loader, criterion, optimizer, num_epochs=10)
+    test(stitching_model, test_loader, criterion)
+
+    # Additional forward pass and comparison logic for analysis
+    images, labels = next(iter(train_loader))
     outputs1, outputs2 = stitching_model.create_stitching_layer(images)
 
-    print("\n Outputs of Model 1 layers:")
+    print("\nOutputs of Model 1 layers:")
     for idx, output in enumerate(outputs1):
         print(f"Output of layer {idx}: {output.shape}")
 
     print("\nOutputs of Model 2 layers:")
     for idx, output in enumerate(outputs2):
-        print(f"Output of layer {idx} : {output.shape}")
+        print(f"Output of layer {idx}: {output.shape}")
 
     # Forward pass through the stitching model
     final_output = stitching_model.forward(images)
 
-    print("\n Final output after stitching:")
+    print("\nFinal output after stitching:")
     print(final_output.shape)
 
     # Compute outputs for comparison
