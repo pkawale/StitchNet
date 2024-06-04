@@ -1,47 +1,67 @@
-import timm
+import os
+
+import certifi
 import torch
-from model_splitter import ModelSplitter, split_model_by_index
+import torchvision.transforms as transforms
+import torchvision.datasets as datasets
+from torch.utils.data import DataLoader
+
+from StitchNet.StitchingLayer import StitchingModel
+
+# Use specific SSL-updated certificates
+os.environ['SSL_CERT_FILE'] = certifi.where()
+
+def load_dataset(batch_size=64):
+    # Load CIFAR-10 dataset
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    cifar10_train = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+    # cifar10_test = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+
+    train_loader = DataLoader(cifar10_train, batch_size=batch_size, shuffle=True)
+    return train_loader
 
 def main():
-    model1 = timm.create_model('resnet18', pretrained=True)
-    model2 = timm.create_model('resnet34', pretrained=True)
+    train_loader = load_dataset()
 
-    model_splitter1 = ModelSplitter(model1)
-    model_splitter2 = ModelSplitter(model2)
+    images, labels = next(iter(train_loader))
 
-    split_index1 = 5
-    part1_model1, part2_model1 = split_model_by_index(model1, split_index1)
+    stitching_model = StitchingModel('resnet18', 'resnet34', split_index1=5, split_index2=5)
 
-    split_index2 = 10
-    part1_model2, part2_model2 = split_model_by_index(model2, split_index2)
+    outputs1, outputs2 = stitching_model.create_stitching_layer(images)
 
-    print("Model 1 - Part 1:")
-    print(part1_model1)
-    print("\nModel 1 - Part 2:")
-    print(part2_model1)
-
-    print("\nModel 2 - Part 1:")
-    print(part1_model2)
-    print("\nModel 2 - Part 2:")
-    print(part2_model2)
-
-    # Example input tensor
-    input_tensor = torch.randn(1, 3, 224, 224)
-
-    # Get the outputs of each layer for model1
-    outputs1 = model_splitter1(input_tensor)
-
-    # Get the outputs of each layer for model2
-    outputs2 = model_splitter2(input_tensor)
-
-    # Print the outputs
-    print("\nOutputs of Model 1 layers:")
+    print("\n Outputs of Model 1 layers:")
     for idx, output in enumerate(outputs1):
         print(f"Output of layer {idx}: {output.shape}")
 
     print("\nOutputs of Model 2 layers:")
     for idx, output in enumerate(outputs2):
-        print(f"Output of layer {idx}: {output.shape}")
+        print(f"Output of layer {idx} : {output.shape}")
+
+    # Forward pass through the stitching model
+    final_output = stitching_model.forward(images)
+
+    print("\n Final output after stitching:")
+    print(final_output.shape)
+
+    # Compute outputs for comparison
+    part1_output = stitching_model.part1_model1(images)
+    stitched_output = stitching_model.stitching_layer(part1_output[stitching_model.split_index1].unsqueeze(2).unsqueeze(3))
+    final_output_model1 = stitching_model.part2_model2(stitched_output)
+
+    print("\nFinal output of Model 1:")
+    print(final_output_model1.shape)
+
+    # Add comparison logic
+    compare_outputs(final_output, final_output_model1)
+
+def compare_outputs(output1, output2):
+    difference = torch.abs(output1 - output2)
+    print("\nDifference between stitched model output and Model 1 output:")
+    print(difference)
 
 if __name__ == "__main__":
     main()
