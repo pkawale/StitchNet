@@ -4,30 +4,46 @@ import torch
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from torch.utils.data import DataLoader
+from stitching_layer import StitchingModel
+from dotenv import load_dotenv, find_dotenv
 
-from StitchNet.temp_stitchingLayer import StitchingModel
+# Load environment variables
+load_dotenv(find_dotenv())
 
 # Use specific SSL-updated certificates
-os.environ['SSL_CERT_FILE'] = certifi.where()
+os.environ["SSL_CERT_FILE"] = (
+    certifi.where()
+    if "SSL_CERT_FILE" not in os.environ
+    else os.environ["SSL_CERT_FILE"]
+)
+
 
 def load_dataset(batch_size=64):
     # Load CIFAR-10 dataset
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    cifar10_train = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+    transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+    cifar10_train = datasets.CIFAR10(
+        root=os.path.join(os.getenv("DATA_DIR", "data"), "cifar10"),
+        train=True,
+        download=True,
+        transform=transform,
+    )
 
     train_loader = DataLoader(cifar10_train, batch_size=batch_size, shuffle=True)
     return train_loader
+
 
 def main():
     train_loader = load_dataset()
 
     images, labels = next(iter(train_loader))
 
-    stitching_model = StitchingModel('resnet18', 'resnet34', 5,5)
+    stitching_model = StitchingModel("resnet18", "resnet34", 5, 5)
 
     outputs1, outputs2 = stitching_model.create_stitching_layer(images)
 
@@ -56,10 +72,12 @@ def main():
     # Add comparison logic
     compare_outputs(final_output, final_output_model1)
 
+
 def compare_outputs(output1, output2):
     difference = torch.abs(output1 - output2)
     print("\nDifference between stitched model output and Model 1 output:")
     print(difference)
+
 
 if __name__ == "__main__":
     main()

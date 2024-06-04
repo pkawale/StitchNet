@@ -10,13 +10,13 @@ def split_model(model, split_index):
 
 def get_output_dim(part):
     for layer in reversed(list(part.modules())):
-        if hasattr(layer, 'out_channels'):
+        if hasattr(layer, "out_channels"):
             return layer.out_channels
     raise AttributeError("No layer with 'out_channels' found")
 
 
 def get_input_dim(part):
     for layer in part.modules():
-        if hasattr(layer, 'in_channels'):
+        if hasattr(layer, "in_channels"):
             return layer.in_channels
     raise AttributeError("No layer with 'in_channels' found")

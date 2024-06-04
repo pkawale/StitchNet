@@ -1,8 +1,7 @@
 import timm
 import torch
 import torch.nn as nn
-
-from StitchNet.model_splitter import get_output_dim, get_input_dim, split_model
+from model_splitter import get_output_dim, get_input_dim, split_model
 
 
 class StitchingLayer(nn.Module):
