@@ -1,5 +1,4 @@
 import os
-import certifi
 import torch
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
@@ -7,17 +6,7 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 from stitching_layer import StitchingModel
 from tqdm.auto import trange, tqdm
-from dotenv import load_dotenv, find_dotenv
-
-# Load environment variables
-load_dotenv(find_dotenv())
-
-# Use specific SSL-updated certificates
-os.environ["SSL_CERT_FILE"] = (
-    certifi.where()
-    if "SSL_CERT_FILE" not in os.environ
-    else os.environ["SSL_CERT_FILE"]
-)
+from config import DATA_DIR, DEVICE
 
 
 def load_dataset(batch_size=64):
@@ -30,13 +19,13 @@ def load_dataset(batch_size=64):
         ]
     )
     cifar10_train = datasets.CIFAR10(
-        root=os.path.join(os.getenv("DATA_DIR", "data"), "cifar10"),
+        root=os.path.join(DATA_DIR, "cifar10"),
         train=True,
         download=True,
         transform=transform,
     )
     cifar10_test = datasets.CIFAR10(
-        root=os.path.join(os.getenv("DATA_DIR", "data"), "cifar10"),
+        root=os.path.join(DATA_DIR, "cifar10"),
         train=False,
         download=True,
         transform=transform,
@@ -47,14 +36,15 @@ def load_dataset(batch_size=64):
     return train_loader, test_loader
 
 
-def train(model, train_loader, criterion, optimizer, num_epochs=10):
+def train(model, train_loader, criterion, optimizer, num_epochs=10, device=DEVICE):
     model.train()
-    for epoch in trange(num_epochs, desc="Training Epochs"):
+    model.to(device)
+    for epoch in trange(num_epochs, desc="Training Epochs", position=0):
         running_loss = 0.0
-        for images, labels in train_loader:
+        for images, labels in tqdm(train_loader, desc="Training Batches", total=len(train_loader), leave=False, position=1):
             optimizer.zero_grad()
-            outputs = model.forward(images)
-            loss = criterion(outputs, labels)
+            outputs = model.forward(images.to(device))
+            loss = criterion(outputs, labels.to(device))
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -63,15 +53,16 @@ def train(model, train_loader, criterion, optimizer, num_epochs=10):
         )
 
 
-def test(model, test_loader, criterion):
+def test(model, test_loader, criterion, device=DEVICE):
     model.eval()
+    model.to(device)
     total = 0
     correct = 0
     test_loss = 0.0
     with torch.no_grad():
-        for images, labels in tqdm(test_loader, desc="Testing", total=len(test_loader)):
-            outputs = model.forward(images)
-            loss = criterion(outputs, labels)
+        for images, labels in tqdm(test_loader, desc="Testing", total=len(test_loader), leave=False, position=1):
+            outputs = model.forward(images.to(device))
+            loss = criterion(outputs, labels.to(device))
             test_loss += loss.item()
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
