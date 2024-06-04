@@ -1,12 +1,11 @@
 import os
-
 import certifi
 import torch
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from torch.utils.data import DataLoader
 
-from StitchNet.StitchingLayer import StitchingModel
+from StitchNet.temp_stitchingLayer import StitchingModel
 
 # Use specific SSL-updated certificates
 os.environ['SSL_CERT_FILE'] = certifi.where()
@@ -19,7 +18,6 @@ def load_dataset(batch_size=64):
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
     cifar10_train = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-    # cifar10_test = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
 
     train_loader = DataLoader(cifar10_train, batch_size=batch_size, shuffle=True)
     return train_loader
@@ -29,7 +27,7 @@ def main():
 
     images, labels = next(iter(train_loader))
 
-    stitching_model = StitchingModel('resnet18', 'resnet34', split_index1=5, split_index2=5)
+    stitching_model = StitchingModel('resnet18', 'resnet34', 5,5)
 
     outputs1, outputs2 = stitching_model.create_stitching_layer(images)
 
@@ -49,7 +47,7 @@ def main():
 
     # Compute outputs for comparison
     part1_output = stitching_model.part1_model1(images)
-    stitched_output = stitching_model.stitching_layer(part1_output[stitching_model.split_index1].unsqueeze(2).unsqueeze(3))
+    stitched_output = stitching_model.stitching_layer(part1_output)
     final_output_model1 = stitching_model.part2_model2(stitched_output)
 
     print("\nFinal output of Model 1:")

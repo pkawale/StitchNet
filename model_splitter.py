@@ -1,46 +1,22 @@
-import torch
-import torch.nn as nn
+from torch import nn
 
 
-class ModelSplitter(nn.Module):
-    def __init__(self, model):
-        super(ModelSplitter, self).__init__()
-        self.model = model
-        self.layers = []
-        self._register_layers()
-
-    def _register_layers(self):
-        for name, layer in self.model.named_children():
-            self.layers.append(layer)
-        self.layers = nn.ModuleList(self.layers)
-
-    def forward(self, x):
-        outputs = []
-        for layer in self.layers:
-            x = layer(x)
-            outputs.append(x)
-        return outputs
-
-
-def split_model_by_index(model, split_index):
-    """
-    Split a PyTorch model into two parts at the specified index.
-    """
-    part1 = nn.Sequential()
-    part2 = nn.Sequential()
-
-    current_index = 0
-    split_point_reached = False
-
-    for name, layer in model.named_children():
-        if current_index == split_index:
-            split_point_reached = True
-
-        if not split_point_reached:
-            part1.add_module(name, layer)
-        else:
-            part2.add_module(name, layer)
-
-        current_index += 1
-
+def split_model(model, split_index):
+    layers = list(model.children())
+    part1 = nn.Sequential(*layers[:split_index])
+    part2 = nn.Sequential(*layers[split_index:])
     return part1, part2
+
+
+def get_output_dim(part):
+    for layer in reversed(list(part.modules())):
+        if hasattr(layer, 'out_channels'):
+            return layer.out_channels
+    raise AttributeError("No layer with 'out_channels' found")
+
+
+def get_input_dim(part):
+    for layer in part.modules():
+        if hasattr(layer, 'in_channels'):
+            return layer.in_channels
+    raise AttributeError("No layer with 'in_channels' found")
