@@ -2,6 +2,7 @@ import timm
 import torch
 import torch.nn as nn
 from model_splitter import get_output_dim, get_input_dim, split_model
+from sklearn.linear_model import LinearRegression
 
 
 class StitchingLayer(nn.Module):
@@ -9,11 +10,30 @@ class StitchingLayer(nn.Module):
         super(StitchingLayer, self).__init__()
         self.conv = nn.Conv2d(input_dim, output_dim, kernel_size=1)
 
+    def initialize_weights_with_regression(self, input_tensor, output_tensor):
+        """Given input_tensor and output_tensor, which are example inputs and outputs of the
+        stitching layer, each of size (batch, features, height, width), this function initializes
+        self.conv.weight and self.conv.bias with a linear regression fit to the data.
+        """
+
+        # Because this is a 1x1 convolution, it's as simple as permuting and reshaping the tensors
+        # then doing a linear regression fit.
+        input_tensor = input_tensor.permute(0, 2, 3, 1).reshape(-1, input_tensor.shape[1])
+        output_tensor = output_tensor.permute(0, 2, 3, 1).reshape(-1, output_tensor.shape[1])
+
+        # Fit a linear regression model
+        regression = LinearRegression()
+        regression.fit(input_tensor.detach().cpu().numpy(), output_tensor.detach().cpu().numpy())
+
+        self.conv.weight.data = torch.tensor(regression.coef_.reshape(output_tensor.shape[1], input_tensor.shape[1], 1, 1))
+        self.conv.bias.data = torch.tensor(regression.intercept_)
+
+
     def forward(self, x):
         return self.conv(x)
 
 
-class StitchingModel:
+class StitchingModel(nn.Module):
     def __init__(self, model_name1, model_name2, split_index1, split_index2):
         super(StitchingModel, self).__init__()
         self.model1 = timm.create_model(model_name1, pretrained=True)
@@ -29,6 +49,15 @@ class StitchingModel:
         output_dim = get_input_dim(self.part2_model2)
 
         self.stitching_layer = StitchingLayer(input_dim, output_dim)
+
+    def parameters_part1(self):
+        yield from self.model1.parameters()
+
+    def parameters_part2(self):
+        yield from self.model2.parameters()
+
+    def parameters_stitching(self):
+        yield from self.stitching_layer.parameters()
 
     def create_stitching_layer(self, input_tensor):
         outputs1 = [input_tensor]

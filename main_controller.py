@@ -6,6 +6,7 @@ import torchvision.datasets as datasets
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from stitching_layer import StitchingModel
+from tqdm.auto import trange, tqdm
 from dotenv import load_dotenv, find_dotenv
 
 # Load environment variables
@@ -48,7 +49,7 @@ def load_dataset(batch_size=64):
 
 def train(model, train_loader, criterion, optimizer, num_epochs=10):
     model.train()
-    for epoch in range(num_epochs):
+    for epoch in trange(num_epochs, desc="Training Epochs"):
         running_loss = 0.0
         for images, labels in train_loader:
             optimizer.zero_grad()
@@ -68,7 +69,7 @@ def test(model, test_loader, criterion):
     correct = 0
     test_loss = 0.0
     with torch.no_grad():
-        for images, labels in test_loader:
+        for images, labels in tqdm(test_loader, desc="Testing", total=len(test_loader)):
             outputs = model.forward(images)
             loss = criterion(outputs, labels)
             test_loss += loss.item()
@@ -85,8 +86,12 @@ def main():
 
     stitching_model = StitchingModel("resnet18", "resnet34", 5, 5)
 
+    # Do a first pass over the data to initialize the stitching layer
+    ... # TODO
+
+    # Refine the stitching layer by gradient descent
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(stitching_model.parameters(), lr=0.001)
+    optimizer = optim.Adam(stitching_model.parameters_stitching(), lr=0.001)
 
     train(stitching_model, train_loader, criterion, optimizer, num_epochs=10)
     test(stitching_model, test_loader, criterion)
