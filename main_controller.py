@@ -31,8 +31,20 @@ def load_dataset(batch_size=64):
         transform=transform,
     )
 
-    train_loader = DataLoader(cifar10_train, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(cifar10_test, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(
+        cifar10_train,
+        batch_size=batch_size,
+        shuffle=True,
+        pin_memory=True,
+        num_workers=8,
+    )
+    test_loader = DataLoader(
+        cifar10_test,
+        batch_size=batch_size,
+        shuffle=False,
+        pin_memory=True,
+        num_workers=8,
+    )
     return train_loader, test_loader
 
 
@@ -41,7 +53,13 @@ def train(model, train_loader, criterion, optimizer, num_epochs=10, device=DEVIC
     model.to(device)
     for epoch in trange(num_epochs, desc="Training Epochs", position=0):
         running_loss = 0.0
-        for images, labels in tqdm(train_loader, desc="Training Batches", total=len(train_loader), leave=False, position=1):
+        for images, labels in tqdm(
+            train_loader,
+            desc="Training Batches",
+            total=len(train_loader),
+            leave=False,
+            position=1,
+        ):
             optimizer.zero_grad()
             outputs = model.forward(images.to(device))
             loss = criterion(outputs, labels.to(device))
@@ -60,7 +78,9 @@ def test(model, test_loader, criterion, device=DEVICE):
     correct = 0
     test_loss = 0.0
     with torch.no_grad():
-        for images, labels in tqdm(test_loader, desc="Testing", total=len(test_loader), leave=False, position=1):
+        for images, labels in tqdm(
+            test_loader, desc="Testing", total=len(test_loader), leave=False, position=1
+        ):
             outputs = model.forward(images.to(device))
             loss = criterion(outputs, labels.to(device))
             test_loss += loss.item()
@@ -78,7 +98,7 @@ def main():
     stitching_model = StitchingModel("resnet18", "resnet34", 5, 5)
 
     # Do a first pass over the data to initialize the stitching layer
-    ... # TODO
+    ...  # TODO
 
     # Refine the stitching layer by gradient descent
     criterion = nn.CrossEntropyLoss()
