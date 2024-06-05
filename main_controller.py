@@ -5,11 +5,18 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from torch import nn, optim
 from torch.utils.data import DataLoader
+from stitching_layer import StitchingModel
+from dotenv import load_dotenv, find_dotenv
 
-from StitchNet.temp_stitchingLayer import StitchingModel
+# Load environment variables
+load_dotenv(find_dotenv())
 
 # Use specific SSL-updated certificates
-os.environ["SSL_CERT_FILE"] = certifi.where()
+os.environ["SSL_CERT_FILE"] = (
+    certifi.where()
+    if "SSL_CERT_FILE" not in os.environ
+    else os.environ["SSL_CERT_FILE"]
+)
 
 
 def load_dataset(batch_size=64):
@@ -22,10 +29,16 @@ def load_dataset(batch_size=64):
         ]
     )
     cifar10_train = datasets.CIFAR10(
-        root="./data", train=True, download=True, transform=transform
+        root=os.path.join(os.getenv("DATA_DIR", "data"), "cifar10"),
+        train=True,
+        download=True,
+        transform=transform,
     )
     cifar10_test = datasets.CIFAR10(
-        root="./data", train=False, download=True, transform=transform
+        root=os.path.join(os.getenv("DATA_DIR", "data"), "cifar10"),
+        train=False,
+        download=True,
+        transform=transform,
     )
 
     train_loader = DataLoader(cifar10_train, batch_size=batch_size, shuffle=True)

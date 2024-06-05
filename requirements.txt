@@ -1,0 +1,8 @@
+torch
+torchvision
+timm
+tqdm
+pandas
+seaborn
+python-dotenv
+black
