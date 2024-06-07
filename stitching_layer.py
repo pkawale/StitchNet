@@ -4,6 +4,7 @@ import torch.nn as nn
 from model_splitter import get_output_dim, get_input_dim, split_model
 from sklearn.linear_model import LinearRegression
 
+
 class StitchingLayer(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(StitchingLayer, self).__init__()
@@ -21,19 +22,22 @@ class StitchingLayer(nn.Module):
         :param output_tensor:
         :return:
         """
-        batch_size, input_dim , height, width = input_tensor.shape
+        batch_size, input_dim, height, width = input_tensor.shape
         _, output_dim, _, _ = output_tensor.shape
 
-        X = input_tensor.permute(0,2,3,1).reshape(-1, input_dim)
-        y = output_tensor.permute(0,2,3,1).reshape(-1, output_dim)
+        X = input_tensor.permute(0, 2, 3, 1).reshape(-1, input_dim)
+        y = output_tensor.permute(0, 2, 3, 1).reshape(-1, output_dim)
 
-        reg = LinearRegression().fit(X,y)
+        reg = LinearRegression().fit(X, y)
 
         # Initialize convolutional layer weights and bias
-        self.conv.weight.data = torch.tensor(reg.coef_).view(output_dim, input_dim, 1, 1)
+        self.conv.weight.data = torch.tensor(reg.coef_).view(
+            output_dim, input_dim, 1, 1
+        )
         self.conv.bias.data = torch.tensor(reg.intercept_)
 
-        #Because this is a 1x1 convolution , it's as simple as permuting and reshaping the tensors then doing a linear regression fit.
+        # Because this is a 1x1 convolution , it's as simple as permuting and reshaping the tensors then doing a linear regression fit.
+
 
 class StitchingModel(nn.Module):
     def __init__(self, model_name1, model_name2, split_index1, split_index2):
@@ -60,6 +64,7 @@ class StitchingModel(nn.Module):
 
     def parameters_stitching(self):
         yield from self.stitching_layer.parameters()
+
     def create_stitching_layer(self, input_tensor):
         outputs1 = [input_tensor]
         x = input_tensor

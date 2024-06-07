@@ -228,7 +228,9 @@ def train(model, train_loader, criterion, optimizer, num_epochs=10):
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
-        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {running_loss / len(train_loader)}")
+        print(
+            f"Epoch [{epoch + 1}/{num_epochs}], Loss: {running_loss / len(train_loader)}"
+        )
 
 
 def test(model, test_loader, criterion):
@@ -257,7 +259,9 @@ def main():
     # Do a first pass over the data to initialize the stitching layer
     inputs, outputs = [], []
     with torch.no_grad():
-        for images, _ in tqdm(train_loader, desc="First Pass Initialization", total=len(train_loader)):
+        for images, _ in tqdm(
+            train_loader, desc="First Pass Initialization", total=len(train_loader)
+        ):
             part1_output = stitching_model.part1_model1(images)
             part2_input = stitching_model.part2_model2(part1_output)
             inputs.append(part1_output)
@@ -279,7 +283,9 @@ def main():
 
     # Test Model 1 (Part 1 of model 1 followed by Part 2 of model 2)
     model1_output = []
-    model1 = nn.Sequential(*list(stitching_model.part1_model1.children()) + [stitching_model.part2_model2])
+    model1 = nn.Sequential(
+        *list(stitching_model.part1_model1.children()) + [stitching_model.part2_model2]
+    )
     model1_loss, model1_accuracy = test(model1, test_loader, criterion)
 
     # Plot comparison results
@@ -287,7 +293,7 @@ def main():
 
 
 def plot_comparison(stitched_loss, stitched_accuracy, model1_loss, model1_accuracy):
-    labels = ['Stitched Model', 'Model 1']
+    labels = ["Stitched Model", "Model 1"]
     losses = [stitched_loss, model1_loss]
     accuracies = [stitched_accuracy, model1_accuracy]
 
@@ -295,20 +301,20 @@ def plot_comparison(stitched_loss, stitched_accuracy, model1_loss, model1_accura
 
     fig, ax1 = plt.subplots()
 
-    color = 'tab:blue'
-    ax1.set_xlabel('Model')
-    ax1.set_ylabel('Loss', color=color)
+    color = "tab:blue"
+    ax1.set_xlabel("Model")
+    ax1.set_ylabel("Loss", color=color)
     ax1.bar(x, losses, color=color, alpha=0.7)
-    ax1.tick_params(axis='y', labelcolor=color)
+    ax1.tick_params(axis="y", labelcolor=color)
 
     ax2 = ax1.twinx()
-    color = 'tab:red'
-    ax2.set_ylabel('Accuracy (%)', color=color)
-    ax2.plot(x, accuracies, color=color, marker='o', linestyle='-')
-    ax2.tick_params(axis='y', labelcolor=color)
+    color = "tab:red"
+    ax2.set_ylabel("Accuracy (%)", color=color)
+    ax2.plot(x, accuracies, color=color, marker="o", linestyle="-")
+    ax2.tick_params(axis="y", labelcolor=color)
 
     plt.xticks(x, labels)
-    plt.title('Comparison of Stitched Model and Model 1')
+    plt.title("Comparison of Stitched Model and Model 1")
     fig.tight_layout()
     plt.show()
 
