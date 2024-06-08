@@ -23,7 +23,7 @@ class StitchingLayer(nn.Module):
         :return:
         """
         batch_size, input_dim, height, width = input_tensor.shape
-        _, output_dim, _, _ = output_tensor.shape
+        _, output_dim = output_tensor.shape
 
         X = input_tensor.permute(0, 2, 3, 1).reshape(-1, input_dim)
         y = output_tensor.permute(0, 2, 3, 1).reshape(-1, output_dim)
