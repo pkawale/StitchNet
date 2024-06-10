@@ -9,22 +9,49 @@ class StitchingLayer(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(StitchingLayer, self).__init__()
         self.conv = nn.Conv2d(input_dim, output_dim, kernel_size=1)
+        self.bn = nn.BatchNorm2d(output_dim)
+        self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        return self.conv(x)
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
 
     def initialize_weights_with_regression(self, input_tensor, output_tensor):
         """
         Given input_tensor and output_tensor, which are example inputs and outputs of the stitching
-        layer, each of size ( batch, features, height, wifdth). this function intializes self.conv.weight and
-        self.conv.bias with a linear regression fit to the data
-        :param input_tensor:
-        :param output_tensor:
-        :return:
+        layer, this function initializes self.conv.weight and self.conv.bias with a linear regression fit to the data.
+        :param input_tensor: torch.Tensor
+        :param output_tensor: torch.Tensor
+        :return: None
         """
-        batch_size, input_dim, height, width = input_tensor.shape
-        _, output_dim = output_tensor.shape
+        # Check shapes of input and output tensors
+        print(f"Input tensor shape: {input_tensor.shape}")
+        print(f"Output tensor shape: {output_tensor.shape}")
 
+        # Ensure input tensor has 4 dimensions
+        if len(input_tensor.shape) != 4:
+            raise ValueError(
+                "Input tensor must have 4 dimensions (batch, features, height, width)."
+            )
+
+        # Reshape output tensor to have 4 dimensions if it has 2
+        if len(output_tensor.shape) == 2:
+            output_tensor = output_tensor.view(
+                output_tensor.size(0), output_tensor.size(1), 1, 1
+            )
+
+        # Check output tensor again
+        if len(output_tensor.shape) != 4:
+            raise ValueError(
+                "Output tensor must have 4 dimensions (batch, features, height, width)."
+            )
+
+        batch_size, input_dim, height, width = input_tensor.shape
+        _, output_dim, out_height, out_width = output_tensor.shape
+
+        # Flatten the tensors while keeping the channel dimension
         X = input_tensor.permute(0, 2, 3, 1).reshape(-1, input_dim)
         y = output_tensor.permute(0, 2, 3, 1).reshape(-1, output_dim)
 
@@ -36,6 +63,9 @@ class StitchingLayer(nn.Module):
         )
         self.conv.bias.data = torch.tensor(reg.intercept_)
 
+        # Ensure tensors are on the same device
+        self.conv.weight.data = self.conv.weight.data.to(input_tensor.device)
+        self.conv.bias.data = self.conv.bias.data.to(input_tensor.device)
         # Because this is a 1x1 convolution , it's as simple as permuting and reshaping the tensors then doing a linear regression fit.
 
 

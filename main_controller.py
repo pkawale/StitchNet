@@ -5,7 +5,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from torch import nn, optim
 from torch.utils.data import DataLoader
-from stitching_layer import StitchingModel
+from stitching_layer import StitchingModel  # Assuming this is your custom module
 from tqdm.auto import trange, tqdm
 import matplotlib.pyplot as plt
 import logging
@@ -70,16 +70,31 @@ def load_dataset(batch_size=64, num_workers=4, pin_memory=True):
         transform=transform,
     )
 
-    train_loader = DataLoader(cifar10_train, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory)
-    test_loader = DataLoader(cifar10_test, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
+    train_loader = DataLoader(
+        cifar10_train,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    test_loader = DataLoader(
+        cifar10_test,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
     return train_loader, test_loader
 
 
-def train(model, train_loader, criterion, optimizer, num_epochs=10, logger=None):
+def train(
+    model, train_loader, criterion, optimizer, device, num_epochs=10, logger=None
+):
     model.train()
     for epoch in trange(num_epochs, desc="Training Epochs"):
         running_loss = 0.0
         for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -92,13 +107,14 @@ def train(model, train_loader, criterion, optimizer, num_epochs=10, logger=None)
         print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {epoch_loss}")
 
 
-def test(model, test_loader, criterion, logger=None):
+def test(model, test_loader, criterion, device, logger=None):
     model.eval()
     total = 0
     correct = 0
     test_loss = 0.0
     with torch.no_grad():
         for images, labels in tqdm(test_loader, desc="Testing", total=len(test_loader)):
+            images, labels = images.to(device), labels.to(device)
             outputs = model(images)
             loss = criterion(outputs, labels)
             test_loss += loss.item()
@@ -114,44 +130,59 @@ def test(model, test_loader, criterion, logger=None):
 
 
 def main(model1_name, model2_name, index1, index2, num_epochs, batch_size):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     training_logger, testing_logger, comparison_logger = setup_logging()
-
+    print("Checkpoint 1")
     train_loader, test_loader = load_dataset(batch_size=batch_size)
-
-    stitching_model = StitchingModel(model1_name, model2_name, index1, index2)
-
+    print("Checkpoint 2")
+    stitching_model = StitchingModel(model1_name, model2_name, index1, index2).to(
+        device
+    )
+    print("Checkpoint 3")
     # Do a first pass over the data to initialize the stitching layer
     inputs, outputs = [], []
     with torch.no_grad():
         for images, _ in tqdm(
             train_loader, desc="First Pass Initialization", total=len(train_loader)
         ):
+            images = images.to(device)
             part1_output = stitching_model.part1_model1(images)
             part2_input = stitching_model.part2_model2(part1_output)
-            inputs.append(part1_output)
-            outputs.append(part2_input)
-
+            inputs.append(part1_output.cpu())
+            outputs.append(part2_input.cpu())
+    print("Checkpoint 4")
     inputs = torch.cat(inputs, dim=0)
     outputs = torch.cat(outputs, dim=0)
 
     stitching_model.stitching_layer.initialize_weights_with_regression(inputs, outputs)
-
+    print("Checkpoint 5")
     # Refine the stitching layer by gradient descent
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(stitching_model.parameters_stitching(), lr=0.001)
 
-    train(stitching_model, train_loader, criterion, optimizer, num_epochs=num_epochs, logger=training_logger)
-
+    train(
+        stitching_model,
+        train_loader,
+        criterion,
+        optimizer,
+        device,
+        num_epochs=num_epochs,
+        logger=training_logger,
+    )
+    print("Checkpoint 6")
     # Test the stitched model
-    stitched_loss, stitched_accuracy = test(stitching_model, test_loader, criterion, logger=testing_logger)
-
+    stitched_loss, stitched_accuracy = test(
+        stitching_model, test_loader, criterion, device, logger=testing_logger
+    )
+    print("Checkpoint 7")
     # Test Model 1 (Part 1 of model 1 followed by Part 2 of model 2)
-    model1_output = []
     model1 = nn.Sequential(
         *list(stitching_model.part1_model1.children()) + [stitching_model.part2_model2]
+    ).to(device)
+    model1_loss, model1_accuracy = test(
+        model1, test_loader, criterion, device, logger=testing_logger
     )
-    model1_loss, model1_accuracy = test(model1, test_loader, criterion, logger=testing_logger)
-
+    print("Checkpoint 8")
     # Plot comparison results
     plot_comparison(stitched_loss, stitched_accuracy, model1_loss, model1_accuracy)
 
@@ -186,22 +217,50 @@ def plot_comparison(stitched_loss, stitched_accuracy, model1_loss, model1_accura
 def compare_outputs(output1, output2, logger=None):
     difference = torch.abs(output1 - output2)
     if logger:
-        logger.info(f"Difference between stitched model output and Model 1 output: {difference}")
+        logger.info(
+            f"Difference between stitched model output and Model 1 output: {difference}"
+        )
     print("\nDifference between stitched model output and Model 1 output:")
     print(difference)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Stitching Model Training Script")
-    parser.add_argument("--model1_name", type=str, required=True, help="Name of the first model")
-    parser.add_argument("--model2_name", type=str, required=True, help="Name of the second model")
-    parser.add_argument("--index1", type=int, required=True, help="Split index for the first model")
-    parser.add_argument("--index2", type=int, required=True, help="Split index for the second model")
-    parser.add_argument("--num_epochs", type=int, default=10, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=64, help="Batch size for training and testing")
-    parser.add_argument("--num_workers", type=int, default=4, help="Number of worker threads for data loading")
-    parser.add_argument("--pin_memory", action='store_true', help="Use pinned memory for data loading")
+    parser.add_argument(
+        "--model1_name", type=str, required=True, help="Name of the first model"
+    )
+    parser.add_argument(
+        "--model2_name", type=str, required=True, help="Name of the second model"
+    )
+    parser.add_argument(
+        "--index1", type=int, required=True, help="Split index for the first model"
+    )
+    parser.add_argument(
+        "--index2", type=int, required=True, help="Split index for the second model"
+    )
+    parser.add_argument(
+        "--num_epochs", type=int, default=10, help="Number of training epochs"
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=64, help="Batch size for training and testing"
+    )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=4,
+        help="Number of worker threads for data loading",
+    )
+    parser.add_argument(
+        "--pin_memory", action="store_true", help="Use pinned memory for data loading"
+    )
 
     args = parser.parse_args()
 
-    main(args.model1_name, args.model2_name, args.index1, args.index2, args.num_epochs, args.batch_size)
+    main(
+        args.model1_name,
+        args.model2_name,
+        args.index1,
+        args.index2,
+        args.num_epochs,
+        args.batch_size,
+    )
