@@ -138,27 +138,31 @@ def main(model1_name, model2_name, index1, index2, num_epochs, batch_size):
     stitching_model = StitchingModel(model1_name, model2_name, index1, index2).to(
         device
     )
-    print("Checkpoint 3")
-    # Do a first pass over the data to initialize the stitching layer
-    inputs, outputs = [], []
-    with torch.no_grad():
-        for images, _ in tqdm(
-            train_loader, desc="First Pass Initialization", total=len(train_loader)
-        ):
-            images = images.to(device)
-            part1_output = stitching_model.part1_model1(images)
-            part2_input = stitching_model.part2_model2(part1_output)
-            inputs.append(part1_output.cpu())
-            outputs.append(part2_input.cpu())
-    print("Checkpoint 4")
-    inputs = torch.cat(inputs, dim=0)
-    outputs = torch.cat(outputs, dim=0)
 
-    stitching_model.stitching_layer.initialize_weights_with_regression(inputs, outputs)
-    print("Checkpoint 5")
+    if torch.cuda.device_count() > 1:
+        stitching_model = nn.DataParallel(stitching_model)
+        print(f"Using {torch.cuda.device_count()} GPUs")
+
+    print("Checkpoint 3")
+    # Take only one batch of data for initializing the stitching layer
+    images, _ = next(iter(train_loader))
+    images = images.to(device)
+    with torch.no_grad():
+        part1_output = stitching_model.module.part1_model1(images)
+        part2_input = stitching_model.module.part2_model2(part1_output)
+        stitching_model.module.stitching_layer.initialize_weights_with_regression(
+            part1_output.cpu(), part2_input.cpu()
+        )
+    del part1_output, part2_input, images
+    torch.cuda.empty_cache()
+
+    print("Checkpoint 4")
+    # Move the model to the device again to ensure everything is on the correct device
+    stitching_model.to(device)
+
     # Refine the stitching layer by gradient descent
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(stitching_model.parameters_stitching(), lr=0.001)
+    optimizer = optim.Adam(stitching_model.parameters(), lr=0.001)
 
     train(
         stitching_model,
@@ -169,20 +173,22 @@ def main(model1_name, model2_name, index1, index2, num_epochs, batch_size):
         num_epochs=num_epochs,
         logger=training_logger,
     )
-    print("Checkpoint 6")
+    print("Checkpoint 5")
     # Test the stitched model
     stitched_loss, stitched_accuracy = test(
         stitching_model, test_loader, criterion, device, logger=testing_logger
     )
-    print("Checkpoint 7")
+    print("Checkpoint 6")
     # Test Model 1 (Part 1 of model 1 followed by Part 2 of model 2)
     model1 = nn.Sequential(
-        *list(stitching_model.part1_model1.children()) + [stitching_model.part2_model2]
+        *list(stitching_model.module.part1_model1.children())
+        + [stitching_model.module.part2_model2]
     ).to(device)
+    model1 = nn.DataParallel(model1)
     model1_loss, model1_accuracy = test(
         model1, test_loader, criterion, device, logger=testing_logger
     )
-    print("Checkpoint 8")
+    print("Checkpoint 7")
     # Plot comparison results
     plot_comparison(stitched_loss, stitched_accuracy, model1_loss, model1_accuracy)
 
