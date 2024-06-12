@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 
@@ -9,14 +10,21 @@ def split_model(model, split_index):
 
 
 def get_output_dim(part):
-    for layer in reversed(list(part.modules())):
-        if hasattr(layer, "out_channels"):
-            return layer.out_channels
-    raise AttributeError("No layer with 'out_channels' found")
+    dummy_input = torch.randn(1, 3, 224, 224)
+    with torch.no_grad():
+        output = part(dummy_input)
+    if len(output.shape) == 4:  # Expecting (batch_size, channels, height, width)
+        print(f"Output dimension from get_output_dim: {output.shape[1]}")  # Debug print
+        return output.shape[1]
+    else:
+        raise ValueError("Output tensor does not have 4 dimensions as expected.")
 
 
 def get_input_dim(part):
     for layer in part.modules():
-        if hasattr(layer, "in_channels"):
-            return layer.in_channels
-    raise AttributeError("No layer with 'in_channels' found")
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
+            dim = (
+                layer.in_channels if isinstance(layer, nn.Conv2d) else layer.in_features
+            )
+            return dim
+    raise AttributeError("No layer with 'in_channels' or 'in_features' found")

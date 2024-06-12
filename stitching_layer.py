@@ -1,8 +1,9 @@
 import timm
 import torch
 import torch.nn as nn
-from model_splitter import get_output_dim, get_input_dim, split_model
 from sklearn.linear_model import LinearRegression
+
+from model_splitter import split_model, get_output_dim, get_input_dim
 
 
 class StitchingLayer(nn.Module):
@@ -13,13 +14,9 @@ class StitchingLayer(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        print(f"Forward pass input shape: {x.shape}")  # Debug print
         x = self.conv(x)
-        print(f"After conv shape: {x.shape}")  # Debug print
         x = self.bn(x)
-        print(f"After bn shape: {x.shape}")  # Debug print
         x = self.relu(x)
-        print(f"After relu shape: {x.shape}")  # Debug print
         return x
 
     def initialize_weights_with_regression(self, input_tensor, output_tensor):
@@ -30,10 +27,6 @@ class StitchingLayer(nn.Module):
         :param output_tensor: torch.Tensor
         :return: None
         """
-        # Check shapes of input and output tensors
-        print(f"Input tensor shape: {input_tensor.shape}")
-        print(f"Output tensor shape: {output_tensor.shape}")
-
         # Ensure input tensor has 4 dimensions
         if len(input_tensor.shape) != 4:
             raise ValueError(
@@ -57,19 +50,35 @@ class StitchingLayer(nn.Module):
 
         # Upscale or downscale input_tensor to match output_tensor dimensions
         if height != out_height or width != out_width:
-            input_tensor = nn.functional.interpolate(input_tensor, size=(out_height, out_width), mode='bilinear', align_corners=False)
+            input_tensor = nn.functional.interpolate(
+                input_tensor,
+                size=(out_height, out_width),
+                mode="bilinear",
+                align_corners=False,
+            )
+
+        # Move tensors to CPU
+        input_tensor = input_tensor.cpu()
+        output_tensor = output_tensor.cpu()
 
         # Flatten the tensors while keeping the channel dimension
         X = input_tensor.permute(0, 2, 3, 1).reshape(-1, input_dim)
         y = output_tensor.permute(0, 2, 3, 1).reshape(-1, output_dim)
 
-        reg = LinearRegression().fit(X, y)
+        reg = LinearRegression().fit(X.numpy(), y.numpy())
 
         # Initialize convolutional layer weights and bias
-        self.conv.weight.data = torch.tensor(reg.coef_, dtype=torch.float32).view(
-            output_dim, input_dim, 1, 1
-        ).to(input_tensor.device)
-        self.conv.bias.data = torch.tensor(reg.intercept_, dtype=torch.float32).to(input_tensor.device)
+        self.conv.weight.data = (
+            torch.tensor(reg.coef_, dtype=torch.float32)
+            .view(output_dim, input_dim, 1, 1)
+            .to(input_tensor.device)
+        )
+        self.conv.bias.data = torch.tensor(reg.intercept_, dtype=torch.float32).to(
+            input_tensor.device
+        )
+
+        # Update BatchNorm layer to match the output dimension of the conv layer
+        self.bn = nn.BatchNorm2d(output_dim)
 
 
 class StitchingModel(nn.Module):
@@ -126,6 +135,11 @@ class StitchingModel(nn.Module):
             part1_output = self.part1_model1(sample_input)
             part2_input_dim = get_input_dim(self.part2_model2)
             upscaled_output = nn.functional.interpolate(
-                part1_output, size=(1, part2_input_dim), mode='bilinear', align_corners=False
+                part1_output,
+                size=(part1_output.size(2), part1_output.size(3)),
+                mode="bilinear",
+                align_corners=False,
             )
-            self.stitching_layer.initialize_weights_with_regression(part1_output, upscaled_output)
+            self.stitching_layer.initialize_weights_with_regression(
+                part1_output, upscaled_output
+            )

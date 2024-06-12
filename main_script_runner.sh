@@ -1,19 +1,13 @@
 #!/bin/bash
 # Universal shell script to execute the stitching model training script with provided parameters
 
-# Set the parameter values
-MODEL1_NAME="resnet18"
-MODEL2_NAME="resnet34"
-INDEX1=5
-INDEX2=5
-NUM_EPOCHS=2
-BATCH_SIZE=64
-NUM_WORKERS=4
-PIN_MEMORY="--pin_memory"
-
 # Define the Python script to run
 PYTHON_SCRIPT="main_controller.py"
 REQUIREMENTS_FILE="requirements.txt"
+
+# Specify the GPUs to use (comma-separated list of GPU indices)
+# shellcheck disable=SC2054
+CUDA_VISIBLE_DEVICES=(0,1,2)
 
 # Function to check if the script is running in a supported environment
 check_environment() {
@@ -38,9 +32,18 @@ install_requirements() {
     fi
 }
 
+# Array of parameters (model1_name, model2_name, index1, index2)
+PARAM_SETS=(
+    "resnet18 resnet34 5 5"
+)
+
 # Function to run the Python script with the parameters
 run_python_script() {
-    $PYTHON_CMD $PYTHON_SCRIPT --model1_name $MODEL1_NAME --model2_name $MODEL2_NAME --index1 $INDEX1 --index2 $INDEX2 --num_epochs $NUM_EPOCHS --batch_size $BATCH_SIZE --num_workers $NUM_WORKERS $PIN_MEMORY
+    local model1_name=$1
+    local model2_name=$2
+    local index1=$3
+    local index2=$4
+    CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES $PYTHON_CMD $PYTHON_SCRIPT --model1_name $model1_name --model2_name $model2_name --index1 $index1 --index2 $index2 --num_epochs $NUM_EPOCHS --batch_size $BATCH_SIZE --num_workers $NUM_WORKERS $PIN_MEMORY
 }
 
 # Check environment
@@ -49,5 +52,20 @@ check_environment
 # Run additional commands
 install_requirements
 
-# Run the Python script
-run_python_script
+# Set common parameters
+NUM_EPOCHS=10
+BATCH_SIZE=64
+NUM_WORKERS=4
+PIN_MEMORY="--pin_memory"
+
+# Iterate over each parameter set and run the Python script
+for params in "${PARAM_SETS[@]}"; do
+    set -- $params
+    model1_name=$1
+    model2_name=$2
+    index1=$3
+    index2=$4
+
+    echo "Running script with parameters: Model1=$model1_name, Model2=$model2_name, Index1=$index1, Index2=$index2"
+    run_python_script $model1_name $model2_name $index1 $index2
+done
