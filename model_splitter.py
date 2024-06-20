@@ -10,14 +10,28 @@ def split_model(model, split_index):
 
 
 def get_output_dim(part):
-    dummy_input = torch.randn(1, 3, 224, 224)
-    with torch.no_grad():
-        output = part(dummy_input)
-    if len(output.shape) == 4:  # Expecting (batch_size, channels, height, width)
-        print(f"Output dimension from get_output_dim: {output.shape[1]}")  # Debug print
-        return output.shape[1]
+    last_conv_or_linear = None
+    for layer in part.modules():
+        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
+            last_conv_or_linear = layer
+
+    if last_conv_or_linear is None:
+        raise AttributeError(
+            "No convolutional or linear layer found in the given model part."
+        )
+
+    if isinstance(last_conv_or_linear, nn.Conv2d):
+        print(
+            f"Output dimension from get_output_dim (Conv2d): {last_conv_or_linear.out_channels}"
+        )  # Debug print
+        return last_conv_or_linear.out_channels
+    elif isinstance(last_conv_or_linear, nn.Linear):
+        print(
+            f"Output dimension from get_output_dim (Linear): {last_conv_or_linear.out_features}"
+        )  # Debug print
+        return last_conv_or_linear.out_features
     else:
-        raise ValueError("Output tensor does not have 4 dimensions as expected.")
+        raise ValueError("The last layer is neither Conv2d nor Linear.")
 
 
 def get_input_dim(part):
