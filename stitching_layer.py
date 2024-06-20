@@ -28,6 +28,7 @@ class StitchingModel(nn.Module):
         # Split the models into two parts
         self.part1_model1 = nn.Sequential(*list(self.model1.children())[:split1])
         self.part2_model2 = nn.Sequential(*list(self.model2.children())[split2:])
+        self.part1_model2 = nn.Sequential(*list(self.model2.children())[:split2])
 
         if len(list(self.part1_model1.children())) == 0:
             raise ValueError(f"Model1 part1 is empty with split index {split1}")
@@ -36,21 +37,17 @@ class StitchingModel(nn.Module):
             raise ValueError(f"Model2 part2 is empty with split index {split2}")
 
         # Get number of channels and dimensions
-        (
-            self.num_output_channels,
-            self.num_input_channels,
-            part1_output_shape,
-            part2_input_shape,
-        ) = self._get_num_channels(self.part1_model1, self.part2_model2)
+        self.num_channels_model1, shape_model1 = self._get_num_channels(self.part1_model1)
+        self.num_channels_model2, shape_model2 = self._get_num_channels(self.part1_model2)
 
-        print(f"num_output_channels: {self.num_output_channels}, num_input_channels: {self.num_input_channels}")
+        print(f"num_output_channels: {self.num_channels_model1}, num_input_channels: {self.num_channels_model2}")
 
         # Initialize the stitching layer to adjust channels and dimensions if needed
         self.stitching_layer = StitchingLayer(
-            self.num_output_channels,
-            self.num_input_channels // 2,
-            (part1_output_shape[2], part1_output_shape[3]),
-            (part2_input_shape[2], part2_input_shape[3])
+            self.num_channels_model1,
+            self.num_channels_model2,
+            (shape_model1[2], shape_model1[3]),
+            (shape_model2[2], shape_model2[3])
         )
 
     def create_cifar10_resnet(self, model_name):
@@ -60,34 +57,19 @@ class StitchingModel(nn.Module):
         model.fc = nn.Linear(model.fc.in_features, 10)
         return model
 
-    def _get_num_channels(self, part1, part2):
-        if len(list(part1.children())) == 0 or len(list(part2.children())) == 0:
+    def _get_num_channels(self, mdl):
+        if len(list(mdl.children())) == 0:
             raise ValueError("One of the model parts is empty.")
+
         with torch.no_grad():
             # Forward pass through part1 to get the output shape
-            x = torch.randn(1, 3, 32, 32).to(next(part1.parameters()).device)
-            for layer in part1:
+            x = torch.randn(1, 3, 32, 32).to(next(mdl.parameters()).device)
+            for layer in mdl:
                 x = layer(x)
             num_output_channels = x.shape[1]
-            part1_output_shape = x.shape
+            output_shape = x.shape
 
-            print(f"Output channels after part1_model1: {num_output_channels}")
-            print(f"Output dimensions after part1_model1: {part1_output_shape}")
-
-            # Forward pass through the first layer of part2 to get the input shape
-            x = torch.randn(1, num_output_channels, x.shape[2], x.shape[3]).to(
-                next(part2.parameters()).device
-            )
-            for layer in part2:
-                x = layer(x)
-                break
-            num_input_channels = x.shape[1]
-            part2_input_shape = x.shape
-
-            print(f"Input channels for part2_model2: {num_input_channels}")
-            print(f"Input dimensions for part2_model2: {part2_input_shape}")
-
-        return num_output_channels, num_input_channels, part1_output_shape, part2_input_shape
+        return num_output_channels, output_shape
 
     def forward(self, x):
         print(f"Input shape: {x.shape}")
