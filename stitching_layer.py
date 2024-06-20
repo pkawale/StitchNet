@@ -1,6 +1,7 @@
 import torch
 from timm import create_model
 from torch import nn
+from sklearn.linear_model import LinearRegression
 
 
 class StitchingLayer(nn.Module):
@@ -15,6 +16,63 @@ class StitchingLayer(nn.Module):
         x = self.bn(x)
         x = self.upsample(x)
         return x
+
+    def initialize_weights_with_regression(self, input_tensor, output_tensor):
+        """
+        Given input_tensor and output_tensor, which are example inputs and outputs of the stitching
+        layer, this function initializes self.conv.weight and self.conv.bias with a linear regression fit to the data.
+        :param input_tensor: torch.Tensor
+        :param output_tensor: torch.Tensor
+        :return: None
+        """
+        # Ensure input tensor has 4 dimensions
+        if len(input_tensor.shape) != 4:
+            raise ValueError(
+                "Input tensor must have 4 dimensions (batch, features, height, width)."
+            )
+
+        # Reshape output tensor to have 4 dimensions if it has 2
+        if len(output_tensor.shape) == 2:
+            output_tensor = output_tensor.view(
+                output_tensor.size(0), output_tensor.size(1), 1, 1
+            )
+
+        # Check output tensor again
+        if len(output_tensor.shape) != 4:
+            raise ValueError(
+                "Output tensor must have 4 dimensions (batch, features, height, width)."
+            )
+
+        batch_size, input_dim, height, width = input_tensor.shape
+        _, output_dim, out_height, out_width = output_tensor.shape
+
+        # Upscale or downscale input_tensor to match output_tensor dimensions
+        if height != out_height or width != out_width:
+            input_tensor = nn.functional.interpolate(
+                input_tensor,
+                size=(out_height, out_width),
+                mode="bilinear",
+                align_corners=False,
+            )
+
+        # Move tensors to CPU
+        final_device = input_tensor.device
+        input_tensor = input_tensor.cpu()
+        output_tensor = output_tensor.cpu()
+
+        # Flatten the tensors while keeping the channel dimension
+        X = input_tensor.permute(0, 2, 3, 1).reshape(-1, input_dim)
+        y = output_tensor.permute(0, 2, 3, 1).reshape(-1, output_dim)
+
+        reg = LinearRegression().fit(X.numpy(), y.numpy())
+
+        # Initialize convolutional layer weights and bias
+        self.conv.weight.data = (
+            torch.tensor(reg.coef_, dtype=torch.float32)
+            .view(output_dim, input_dim, 1, 1)
+            .to(final_device)
+        )
+        self.conv.bias.data = torch.tensor(reg.intercept_, dtype=torch.float32).to(final_device)
 
 
 class StitchingModel(nn.Module):
@@ -40,7 +98,7 @@ class StitchingModel(nn.Module):
         self.num_channels_model1, shape_model1 = self._get_num_channels(self.part1_model1)
         self.num_channels_model2, shape_model2 = self._get_num_channels(self.part1_model2)
 
-        print(f"num_output_channels: {self.num_channels_model1}, num_input_channels: {self.num_channels_model2}")
+        #print(f"num_output_channels: {self.num_channels_model1}, num_input_channels: {self.num_channels_model2}")
 
         # Initialize the stitching layer to adjust channels and dimensions if needed
         self.stitching_layer = StitchingLayer(
@@ -72,13 +130,13 @@ class StitchingModel(nn.Module):
         return num_output_channels, output_shape
 
     def forward(self, x):
-        print(f"Input shape: {x.shape}")
+        #print(f"Input shape: {x.shape}")
         x = self.part1_model1(x)
-        print(f"After part1_model1: {x.shape}")
+        #print(f"After part1_model1: {x.shape}")
         x = self.stitching_layer(x)
-        print(f"After stitching_layer: {x.shape}")
+        #print(f"After stitching_layer: {x.shape}")
         x = self.part2_model2(x)
-        print(f"After part2_model2: {x.shape}")
+        #print(f"After part2_model2: {x.shape}")
         return x
 
     def parameter_part1(self):
@@ -101,7 +159,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     stitching_model = StitchingModel(model1_name, model2_name, split1, split2).to(device)
-    print(stitching_model)
+    #print(stitching_model)
 
     # Debugging with a dummy input
     dummy_input = torch.randn(1, 3, 32, 32).to(device)
