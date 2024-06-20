@@ -10,15 +10,6 @@ from utils import setup_logging, load_dataset
 from plotter import plot_stitching_penalty
 
 
-def print_gpu_memory_usage(step):
-    print(
-        f"[{step}] Current GPU memory usage: {torch.cuda.memory_allocated() / 1024 ** 2:.2f} MB"
-    )
-    print(
-        f"[{step}] Max GPU memory usage: {torch.cuda.max_memory_allocated() / 1024 ** 2:.2f} MB"
-    )
-
-
 def train(
     model,
     train_loader,
@@ -26,7 +17,6 @@ def train(
     optimizer,
     device,
     num_epochs=10,
-    accumulation_steps=8,
     logger=None,
 ):
     model.train()
@@ -34,44 +24,26 @@ def train(
     epoch_losses = []
 
     for epoch in trange(num_epochs, desc="Training Epochs"):
-        running_loss = 0.0
+        running_loss = torch.zeros(len(train_loader), device=device)
         optimizer.zero_grad()  # Reset gradients
         for i, (images, labels) in enumerate(
             tqdm(train_loader, desc="Training", total=len(train_loader))
         ):
             images, labels = images.to(device), labels.to(device)
 
-            # Split the batch into smaller chunks to fit into memory
-            chunks = 4  # Adjust this value based on your memory constraints
-            chunk_size = images.size(0) // chunks
-            chunk_loss = 0.0
-
-            for j in range(chunks):
-                image_chunk = images[j * chunk_size:(j + 1) * chunk_size]
-                label_chunk = labels[j * chunk_size:(j + 1) * chunk_size]
-
-                with autocast():
-                    # Forward pass
-                    outputs = model(image_chunk)
-                    loss = criterion(outputs, label_chunk)
-                    loss = loss / accumulation_steps  # Normalize loss by accumulation steps
-
+            with autocast():
+                # Forward pass
+                outputs = model(images)
+                loss = criterion(outputs, labels)
                 scaler.scale(loss).backward()
-                chunk_loss += loss.item()
 
-            if (i + 1) % accumulation_steps == 0:
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad()  # Reset gradients
+            running_loss[i] = loss.detach()
 
-            running_loss += chunk_loss * accumulation_steps / chunks
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
 
-            # Clear cache to free up memory
-            torch.cuda.empty_cache()
-            if (i + 1) % (accumulation_steps * 10) == 0:
-                print_gpu_memory_usage(f"Epoch {epoch + 1} Iteration {i + 1}")
-
-        epoch_loss = running_loss / len(train_loader)
+        epoch_loss = torch.mean(running_loss).item()
         epoch_losses.append(epoch_loss)
         if logger:
             logger.info(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {epoch_loss}")
@@ -93,10 +65,6 @@ def test(model, test_loader, criterion, device, logger=None):
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-
-            # Clear cache to free up memory
-            torch.cuda.empty_cache()
-            print_gpu_memory_usage("During Testing")
 
     accuracy = 100 * correct / total
     avg_loss = test_loss / len(test_loader)
@@ -176,7 +144,6 @@ def main(
         optimizer,
         device,
         num_epochs=num_epochs,
-        accumulation_steps=4,  # Lower accumulation steps to fit in memory
         logger=training_logger,
     )
     stitched_test_loss, stitched_accuracy = test(
@@ -212,7 +179,7 @@ if __name__ == "__main__":
         "--num_epochs", type=int, default=10, help="Number of training epochs"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=2, help="Batch size for training and testing"  # Reduced batch size
+        "--batch_size", type=int, default=64, help="Batch size for training and testing"
     )
     parser.add_argument(
         "--num_workers",
@@ -225,9 +192,6 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
-    # Disable cuDNN benchmarking to avoid memory issues
-    torch.backends.cudnn.benchmark = False
 
     main(
         args.model1_name,
