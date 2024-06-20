@@ -6,8 +6,7 @@ PYTHON_SCRIPT="main_controller.py"
 REQUIREMENTS_FILE="requirements.txt"
 
 # Specify the GPUs to use (comma-separated list of GPU indices)
-# shellcheck disable=SC2054
-CUDA_VISIBLE_DEVICES=(0,1,2)
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4
 
 # Function to check if the script is running in a supported environment
 check_environment() {
@@ -34,7 +33,7 @@ install_requirements() {
 
 # Array of parameters (model1_name, model2_name, index1, index2)
 PARAM_SETS=(
-    "resnet18 resnet34 5 5"
+    "resnet18 resnet18 5 5"
 )
 
 # Function to run the Python script with the parameters
