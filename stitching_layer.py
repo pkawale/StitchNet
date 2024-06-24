@@ -3,6 +3,8 @@ from timm import create_model
 from torch import nn
 from sklearn.linear_model import LinearRegression
 
+from model_splitter import get_input_dim
+
 
 class StitchingLayer(nn.Module):
     def __init__(self, input_dim, output_dim, input_size, output_size):
@@ -148,6 +150,20 @@ class StitchingModel(nn.Module):
     def parameters_stitching(self):
         if isinstance(self.stitching_layer, StitchingLayer):
             yield from self.stitching_layer.parameters()
+
+    def initialize_stitching_layer(self, sample_input):
+        with torch.no_grad():
+            part1_output = self.part1_model1(sample_input)
+            part2_input_dim = get_input_dim(self.part2_model2)
+            upscaled_output = nn.functional.interpolate(
+                part1_output,
+                size=(part1_output.size(2), part1_output.size(3)),
+                mode="bilinear",
+                align_corners=False,
+            )
+            self.stitching_layer.initialize_weights_with_regression(
+                part1_output, upscaled_output
+            )
 
 
 # Example usage

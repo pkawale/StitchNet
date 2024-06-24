@@ -48,6 +48,8 @@ def main(
     optimizer = optim.Adam(stitching_model_regression_init.parameters(), lr=0.001)
 
     ### TEMPORARY
+    train(stitching_model_regression_init.model1, train_loader, criterion, optimizer, device, 10, training_logger)
+    train(stitching_model_regression_init.model2, train_loader, criterion, optimizer, device, 10, training_logger)
     model1_loss, model1_acc = test(stitching_model_regression_init.model1, test_loader, criterion, device)
     model2_loss, model2_acc = test(stitching_model_regression_init.model2, test_loader, criterion, device)
     print("Model 1 (pretrained) loss:", model1_loss)
@@ -57,23 +59,23 @@ def main(
 
     assert model1_acc > 50 and model2_acc > 50, "Models and data are mismatched; fix this before stitching!"
 
+    regression_init_train_losses = []
     regression_init_test_losses = []
 
-    regression_init_test_losses.append(
-        test(stitching_model_regression_init, test_loader, criterion, device)[0]
-    )
-    regression_init_train_losses = train(
-        stitching_model_regression_init,
-        train_loader,
-        criterion,
-        optimizer,
-        device,
-        num_epochs=1,
-        logger=training_logger,
-    )
-    regression_init_test_losses.append(
-        test(stitching_model_regression_init, test_loader, criterion, device)[0]
-    )
+    for epoch in range(10):
+        train_loss = train(
+            stitching_model_regression_init,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
+            num_epochs=1,
+            logger=training_logger,
+        )
+        test_loss = test(stitching_model_regression_init, test_loader, criterion, device)[0]
+
+        regression_init_train_losses.append(train_loss)
+        regression_init_test_losses.append(test_loss)
 
     #####
     # RANDOM INIT
@@ -87,37 +89,33 @@ def main(
     optimizer = optim.Adam(stitching_model_random_init.parameters(), lr=0.001)
 
     random_init_test_losses = []
+    random_init_train_losses = []
 
-    random_init_test_losses.append(
-        test(stitching_model_random_init, test_loader, criterion, device)[0]
-    )
-    random_init_train_losses = train(
-        stitching_model_random_init,
-        train_loader,
-        criterion,
-        optimizer,
-        device,
-        num_epochs=1,
-        logger=training_logger,
-    )
-    random_init_test_losses.append(
-        test(stitching_model_random_init, test_loader, criterion, device)[0]
-    )
+    for epoch in range(10):
+        train_loss = train(
+            stitching_model_random_init,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
+            num_epochs=1,
+            logger=training_logger,
+        )
+        test_loss = test(stitching_model_random_init, test_loader, criterion, device)[0]
 
-    plt.figure(figsize=(6, 4))
-    plt.plot(random_init_train_losses, label="Random Init Train Loss")
-    plt.plot(
-        [0, len(random_init_train_losses) - 1],
-        random_init_test_losses,
-        label="Random Init Test Loss",
-    )
+        random_init_train_losses.append(train_loss)
+        random_init_test_losses.append(test_loss)
+
+    plt.figure(figsize=(10,6))
     plt.plot(regression_init_train_losses, label="Regression Init Train Loss")
-    plt.plot(
-        [0, len(regression_init_train_losses) - 1],
-        regression_init_test_losses,
-        label="Regression Init Test Loss",
-    )
+    plt.plot(regression_init_test_losses, label="Regression Init Test Loss")
+    plt.plot(random_init_train_losses, label="Random Init Train Loss")
+    plt.plot(random_init_test_losses, label="Random Init Test Loss")
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
     plt.legend()
+    plt.title('Training and Test Losses')
+    plt.savefig("graph.png")
     plt.show()
 
 
