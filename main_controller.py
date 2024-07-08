@@ -144,130 +144,9 @@ def visualize_model(model, inputs):
     )
 
 
-def main(
-    model1_name,
-    model2_name,
-    index1,
-    index2,
-    num_epochs,
-    batch_size,
-    num_workers,
-    pin_memory,
-    data_dir,
-    pretrained,
-    test_phase,
-    dev,
-    precision,
-    learning_rate,
-    weight_decay,
+def stitching_test_same_model(
+    model1_name, num_epochs, device, data_module, training_logger, testing_logger
 ):
-    seed_everything(0)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(
-        map(str, range(torch.cuda.device_count()))
-    )
-
-    checkpoint = ModelCheckpoint(monitor="val_loss", mode="min", save_last=False)
-    lr_monitor = LearningRateMonitor(logging_interval='step')
-
-    trainer = Trainer(
-        fast_dev_run=bool(dev),
-        logger=None if bool(dev + test_phase) else None,
-        devices="auto",
-        accelerator="gpu",
-        deterministic=True,
-        log_every_n_steps=1,
-        max_epochs=num_epochs,
-        callbacks=[checkpoint, lr_monitor],
-        precision=precision,
-    )
-
-    # Add data augmentation for training data
-    train_transform = T.Compose([
-        T.RandomCrop(32, padding=4),
-        T.RandomHorizontalFlip(),
-        T.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.2),
-        T.RandomRotation(15),
-        T.ToTensor(),
-        T.Normalize((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616))
-    ])
-
-    val_transform = T.Compose([
-        T.ToTensor(),
-        T.Normalize((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616))
-    ])
-
-    data_module = CIFAR10Data(
-        data_dir,
-        batch_size,
-        num_workers,
-        pin_memory,
-        train_transform=train_transform,
-        val_transform=val_transform
-    )
-    data_module.prepare_data()
-    data_module.setup(stage="fit")  # Provide the 'stage' argument
-
-    model = CIFAR10Module(model_name=model1_name, learning_rate=learning_rate, weight_decay=weight_decay).to(device)
-
-    if bool(test_phase):
-        data_module.setup(stage="test")
-        trainer.test(model, data_module.test_dataloader())
-        return
-
-    trainer.fit(model, data_module.train_dataloader(), data_module.val_dataloader())
-    trainer.test(model, data_module.test_dataloader())
-
-    # Original stitching code starts here
-
-    training_logger, testing_logger, comparison_logger = setup_logging(
-        model1_name, model2_name
-    )
-
-    # Use the already trained model1
-    model1 = model.model
-    model1 = model1.to(device)
-    criterion = nn.CrossEntropyLoss()
-
-    print(f"Using trained {model1_name}")
-    _, accuracy1 = test(
-        model1,
-        data_module.val_dataloader(),
-        criterion,
-        device,
-        logger=testing_logger,
-    )
-    assert accuracy1 > 80, "Model 1 is not learning; check the model and data"
-
-    # Train and test the initial model2
-    model2 = timm.create_model(model2_name, pretrained=False, num_classes=10).to(
-        device
-    )
-    optimizer = optim.AdamW(model2.parameters(), lr=learning_rate, weight_decay=weight_decay)  # Use same optimizer and parameters
-    scheduler2 = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", patience=3, factor=0.5, verbose=True
-    )
-
-    print(f"Training {model2_name}")
-    train(
-        model2,
-        data_module.train_dataloader(),
-        criterion,
-        optimizer,
-        device,
-        num_epochs,
-        logger=training_logger,
-        scheduler=scheduler2,
-    )
-    _, accuracy2 = test(
-        model2,
-        data_module.val_dataloader(),
-        criterion,
-        device,
-        logger=testing_logger,
-    )
-    assert accuracy2 > 80, "Model 2 is not learning; check the model and data"
-
     # Assumed values of i and j for the test case
     i = 3  # Example layer index for model1
     j = 3  # Example layer index for model1
@@ -299,6 +178,140 @@ def main(
         logger=testing_logger,
     )
     print(f"Expected Loss: 0, Actual Test Loss: {stitched_test_loss}")
+
+
+def main(
+    model1_name,
+    model2_name,
+    index1,
+    index2,
+    num_epochs,
+    batch_size,
+    num_workers,
+    pin_memory,
+    data_dir,
+    pretrained,
+    test_phase,
+    dev,
+    precision,
+    learning_rate,
+    weight_decay,
+):
+    seed_everything(0)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(
+        map(str, range(torch.cuda.device_count()))
+    )
+
+    checkpoint = ModelCheckpoint(monitor="val_loss", mode="min", save_last=False)
+    lr_monitor = LearningRateMonitor(logging_interval="step")
+
+    trainer = Trainer(
+        fast_dev_run=bool(dev),
+        logger=None if bool(dev + test_phase) else None,
+        devices="auto",
+        accelerator="gpu",
+        deterministic=True,
+        log_every_n_steps=1,
+        max_epochs=num_epochs,
+        callbacks=[checkpoint, lr_monitor],
+        precision=precision,
+    )
+
+    # Add data augmentation for training data
+    train_transform = T.Compose(
+        [
+            T.RandomCrop(32, padding=4),
+            T.RandomHorizontalFlip(),
+            T.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.2),
+            T.RandomRotation(15),
+            T.ToTensor(),
+            T.Normalize((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)),
+        ]
+    )
+
+    val_transform = T.Compose(
+        [T.ToTensor(), T.Normalize((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616))]
+    )
+
+    data_module = CIFAR10Data(
+        data_dir,
+        batch_size,
+        num_workers,
+        pin_memory,
+        train_transform=train_transform,
+        val_transform=val_transform,
+    )
+    data_module.prepare_data()
+    data_module.setup(stage="fit")
+
+    model = CIFAR10Module(
+        model_name=model1_name, learning_rate=learning_rate, weight_decay=weight_decay
+    ).to(device)
+
+    if bool(test_phase):
+        data_module.setup(stage="test")
+        trainer.test(model, data_module.test_dataloader())
+        return
+
+    trainer.fit(model, data_module.train_dataloader(), data_module.val_dataloader())
+    trainer.test(model, data_module.test_dataloader())
+
+    # Original stitching code starts here
+
+    training_logger, testing_logger, comparison_logger = setup_logging(
+        model1_name, model2_name
+    )
+
+    # Use the already trained model1
+    model1 = model.model
+    model1 = model1.to(device)
+    criterion = nn.CrossEntropyLoss()
+
+    print(f"Using trained {model1_name}")
+    _, accuracy1 = test(
+        model1,
+        data_module.val_dataloader(),
+        criterion,
+        device,
+        logger=testing_logger,
+    )
+    assert accuracy1 > 80, "Model 1 is not learning; check the model and data"
+
+    # Train and test the initial model2
+    model2 = timm.create_model(model2_name, pretrained=False, num_classes=10).to(device)
+    optimizer = optim.AdamW(
+        model2.parameters(), lr=learning_rate, weight_decay=weight_decay
+    )  # Use same optimizer and parameters
+    scheduler2 = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", patience=3, factor=0.5, verbose=True
+    )
+
+    print(f"Training {model2_name}")
+    train(
+        model2,
+        data_module.train_dataloader(),
+        criterion,
+        optimizer,
+        device,
+        num_epochs,
+        logger=training_logger,
+        scheduler=scheduler2,
+    )
+    _, accuracy2 = test(
+        model2,
+        data_module.val_dataloader(),
+        criterion,
+        device,
+        logger=testing_logger,
+    )
+    assert accuracy2 > 80, "Model 2 is not learning; check the model and data"
+
+    # Save initial parameters
+    initial_params_model1 = [p.clone() for p in model1.parameters()]
+    initial_params_model2 = [p.clone() for p in model2.parameters()]
+
+    images = next(iter(data_module.train_dataloader()))[0].to(device)
 
     stitching_model = StitchingModel(model1_name, model2_name, index1, index2).to(
         device
@@ -338,6 +351,14 @@ def main(
         num_epochs,
     )
     plot_stitching_penalty(penalties, model1_name, model2_name)
+
+    stitching_test_same_model(model1_name, num_epochs, device, data_module, training_logger, testing_logger)
+
+    # Assert that parameters of model1 and model2 haven't changed
+    for original, new in zip(initial_params_model1, model1.parameters()):
+        assert torch.equal(original, new), "Model 1 parameters changed after stitching"
+    for original, new in zip(initial_params_model2, model2.parameters()):
+        assert torch.equal(original, new), "Model 2 parameters changed after stitching"
 
 
 if __name__ == "__main__":

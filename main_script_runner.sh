@@ -79,7 +79,7 @@ check_environment
 install_requirements
 
 # Set common parameters
-NUM_EPOCHS=150
+NUM_EPOCHS=20
 BATCH_SIZE=64
 NUM_WORKERS=4
 PIN_MEMORY="--pin_memory"
