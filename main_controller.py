@@ -1,13 +1,13 @@
 import argparse
 import os
 import torch
-import timm
 from torch import nn, optim
 from torchviz import make_dot
 from tqdm import tqdm
+from glob import glob
+from pathlib import Path
+from CIFAR10Module import CIFAR10Module
 from stitching_layer import StitchingModel
-from utils import setup_logging
-from plotter import plot_stitching_penalty
 
 
 def train(
@@ -174,152 +174,47 @@ def stitching_test_same_model(
     print(f"Expected Loss: 0, Actual Test Loss: {stitched_test_loss}")
 
 
+def find_checkpoint_for_model(log_dir: Path, model_name: str) -> Path:
+    checkpoint_dir = list(glob(str(log_dir / f"{model_name}_*" / "checkpoints")))
+    if len(checkpoint_dir) == 0:
+        raise ValueError(f"Model {model_name} not found in {log_dir}")
+    elif len(checkpoint_dir) > 1:
+        raise ValueError(f"Multiple models found in {log_dir}")
+    checkpoint_dir = Path(checkpoint_dir[0])
+    list_of_files = list(checkpoint_dir.glob("*.ckpt"))
+    if len(list_of_files) == 0:
+        raise ValueError(f"No checkpoint found for {model_name}")
+    elif len(list_of_files) > 1:
+        # TODO - return 'best' or 'last' or let user pick
+        raise ValueError(f"Multiple checkpoints found for {model_name}")
+    return list_of_files[0]
+
+
 def main(
     model1_name,
     model2_name,
     index1,
     index2,
-    num_epochs,
-    batch_size,
-    num_workers,
-    pin_memory,
-    data_dir,
-    pretrained,
-    test_phase,
-    dev,
-    precision,
-    learning_rate,
-    weight_decay,
+    log_dir,
 ):
+    # we are pretraining model1 and model2 and saving them in the checkpoints in train.py
+    # we are loading the pre-trained model1 and model2 here
+    # Load the pre-existing model from log_dir
 
-    # TODO - load pretrained models
+    checkpoint_path = find_checkpoint_for_model(log_dir, model1_name)
+    print("[INFO]: loading model1 from", checkpoint_path)
+    model1 = CIFAR10Module.load_from_checkpoint(checkpoint_path)
 
-    # Original stitching code starts here
+    checkpoint_path = find_checkpoint_for_model(log_dir, model2_name)
+    print("[INFO]: loading model2 from", checkpoint_path)
+    model2 = CIFAR10Module.load_from_checkpoint(checkpoint_path)
 
-    training_logger, testing_logger, comparison_logger = setup_logging(
-        model1_name, model2_name
-    )
-
-    # Use the already trained model1
-    model1 = model.model
-    model1 = model1.to(device)
-    criterion = nn.CrossEntropyLoss()
-
-    print(f"Using trained {model1_name}")
-    _, accuracy1 = test(
-        model1,
-        data_module.val_dataloader(),
-        criterion,
-        device,
-        logger=testing_logger,
-    )
-    assert accuracy1 > 80, "Model 1 is not learning; check the model and data"
-
-    # Train and test the initial model2
-    model2 = timm.create_model(model2_name, pretrained=False, num_classes=10).to(device)
-    optimizer = optim.AdamW(
-        model2.parameters(), lr=learning_rate, weight_decay=weight_decay
-    )  # Use same optimizer and parameters
-    scheduler2 = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", patience=3, factor=0.5, verbose=True
-    )
-
-    print(f"Training {model2_name}")
-    train(
-        model2,
-        data_module.train_dataloader(),
-        criterion,
-        optimizer,
-        device,
-        num_epochs,
-        logger=training_logger,
-        scheduler=scheduler2,
-    )
-    _, accuracy2 = test(
-        model2,
-        data_module.val_dataloader(),
-        criterion,
-        device,
-        logger=testing_logger,
-    )
-    assert accuracy2 > 80, "Model 2 is not learning; check the model and data"
-
-    # Save initial parameters
-    initial_params_model1 = [p.clone() for p in model1.parameters()]
-    initial_params_model2 = [p.clone() for p in model2.parameters()]
-
-    images = next(iter(data_module.train_dataloader()))[0].to(device)
-
-    stitching_model = StitchingModel(model1_name, model2_name, index1, index2).to(
-        device
-    )
-
-    # Visualize the stitching model
-    visualize_model(stitching_model, images)
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(stitching_model.parameters(), lr=0.001)
-
-    stitched_train_losses = train(
-        stitching_model,
-        data_module.train_dataloader(),
-        criterion,
-        optimizer,
-        device,
-        num_epochs=num_epochs,
-        logger=training_logger,
-    )
-    stitched_test_loss, stitched_accuracy = test(
-        stitching_model,
-        data_module.val_dataloader(),
-        criterion,
-        device,
-        logger=testing_logger,
-    )
-    penalties = measure_stitching_penalty(
-        model1,
-        model2,
-        model1_name,
-        model2_name,
-        device,
-        data_module.train_dataloader(),
-        data_module.val_dataloader(),
-        criterion,
-        num_epochs,
-    )
-    plot_stitching_penalty(penalties, model1_name, model2_name)
-
-    stitching_test_same_model(model1_name, num_epochs, device, data_module, training_logger, testing_logger)
-
-    # Assert that parameters of model1 and model2 haven't changed
-    for original, new in zip(initial_params_model1, model1.parameters()):
-        assert torch.equal(original, new), "Model 1 parameters changed after stitching"
-    for original, new in zip(initial_params_model2, model2.parameters()):
-        assert torch.equal(original, new), "Model 2 parameters changed after stitching"
+    stitching_model = StitchingModel(model1_name, model2_name, index1, index2)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Stitching Model Training Script")
 
-    # PROGRAM level args
-    parser.add_argument(
-        "--data_dir", type=str, required=True, help="Directory to store CIFAR-10 data"
-    )
-    parser.add_argument(
-        "--download_weights",
-        type=int,
-        default=0,
-        choices=[0, 1],
-        help="Download pretrained weights",
-    )
-    parser.add_argument(
-        "--test_phase", type=int, default=0, choices=[0, 1], help="Test phase flag"
-    )
-    parser.add_argument(
-        "--dev", type=int, default=0, choices=[0, 1], help="Development mode flag"
-    )
-
-    # TRAINER args
     parser.add_argument(
         "--model1_name", type=str, required=True, help="Name of the first model"
     )
@@ -327,41 +222,22 @@ if __name__ == "__main__":
         "--model2_name", type=str, required=True, help="Name of the second model"
     )
     parser.add_argument(
-        "--index1", type=int, required=True, help="Split index for the first model"
-    )
-    parser.add_argument(
-        "--index2", type=int, required=True, help="Split index for the second model"
-    )
-    parser.add_argument(
-        "--pretrained", type=int, default=0, choices=[0, 1], help="Use pretrained model"
-    )
-    parser.add_argument(
-        "--precision",
+        "--index1",
         type=int,
-        default=32,
-        choices=[16, 32],
-        help="Precision for training",
+        required=True,
+        help="Split Index of the layer in the first model",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=64, help="Batch size for training and testing"
-    )
-    parser.add_argument(
-        "--num_epochs", type=int, default=10, help="Number of training epochs"
-    )
-    parser.add_argument(
-        "--num_workers",
+        "--index2",
         type=int,
-        default=4,
-        help="Number of worker threads for data loading",
+        required=True,
+        help="Split Index of the layer in the second model",
     )
     parser.add_argument(
-        "--pin_memory", action="store_true", help="Use pinned memory for data loading"
-    )
-    parser.add_argument(
-        "--learning_rate", type=float, default=1e-3, help="Learning rate for optimizer"
-    )
-    parser.add_argument(
-        "--weight_decay", type=float, default=1e-4, help="Weight decay for optimizer"
+        "--log_dir",
+        type=Path,
+        required=True,
+        help="Directory to store logs and checkpoints",
     )
 
     args = parser.parse_args()
@@ -371,15 +247,5 @@ if __name__ == "__main__":
         args.model2_name,
         args.index1,
         args.index2,
-        args.num_epochs,
-        args.batch_size,
-        args.num_workers,
-        args.pin_memory,
-        args.data_dir,
-        args.pretrained,
-        args.test_phase,
-        args.dev,
-        args.precision,
-        args.learning_rate,
-        args.weight_decay,
+        args.log_dir,
     )
