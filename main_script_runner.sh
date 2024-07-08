@@ -42,7 +42,34 @@ run_python_script() {
     local model2_name=$2
     local index1=$3
     local index2=$4
-    CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES $PYTHON_CMD $PYTHON_SCRIPT --model1_name $model1_name --model2_name $model2_name --index1 $index1 --index2 $index2 --num_epochs $NUM_EPOCHS --batch_size $BATCH_SIZE --num_workers $NUM_WORKERS $PIN_MEMORY
+    local num_epochs=$5
+    local batch_size=$6
+    local num_workers=$7
+    local pin_memory=$8
+    local data_dir=$9
+    local pretrained=${10}
+    local test_phase=${11}
+    local dev=${12}
+    local precision=${13}
+    local learning_rate=${14}
+    local weight_decay=${15}
+
+    CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES $PYTHON_CMD $PYTHON_SCRIPT \
+        --model1_name $model1_name \
+        --model2_name $model2_name \
+        --index1 $index1 \
+        --index2 $index2 \
+        --num_epochs $num_epochs \
+        --batch_size $batch_size \
+        --num_workers $num_workers \
+        $pin_memory \
+        --data_dir $data_dir \
+        --pretrained $pretrained \
+        --test_phase $test_phase \
+        --dev $dev \
+        --precision $precision \
+        --learning_rate $learning_rate \
+        --weight_decay $weight_decay
 }
 
 # Check environment
@@ -52,10 +79,17 @@ check_environment
 install_requirements
 
 # Set common parameters
-NUM_EPOCHS=10
+NUM_EPOCHS=150
 BATCH_SIZE=64
 NUM_WORKERS=4
 PIN_MEMORY="--pin_memory"
+DATA_DIR="./data"  # Set this to your actual data directory
+PRETRAINED=0
+TEST_PHASE=0
+DEV=0
+PRECISION=32
+LEARNING_RATE=1e-3
+WEIGHT_DECAY=1e-4
 
 # Iterate over each parameter set and run the Python script
 for params in "${PARAM_SETS[@]}"; do
@@ -66,5 +100,5 @@ for params in "${PARAM_SETS[@]}"; do
     index2=$4
 
     echo "Running script with parameters: Model1=$model1_name, Model2=$model2_name, Index1=$index1, Index2=$index2"
-    run_python_script $model1_name $model2_name $index1 $index2
+    run_python_script $model1_name $model2_name $index1 $index2 $NUM_EPOCHS $BATCH_SIZE $NUM_WORKERS $PIN_MEMORY $DATA_DIR $PRETRAINED $TEST_PHASE $DEV $PRECISION $LEARNING_RATE $WEIGHT_DECAY
 done

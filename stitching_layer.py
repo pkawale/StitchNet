@@ -10,14 +10,13 @@ class StitchingLayer(nn.Module):
     def __init__(self, input_dim, output_dim, input_size, output_size):
         super(StitchingLayer, self).__init__()
         self.conv = nn.Conv2d(input_dim, output_dim, kernel_size=1)
-        self.bn = nn.BatchNorm2d(output_dim)
         self.upsample = nn.Upsample(size=output_size, mode='bilinear', align_corners=False) if input_size != output_size else nn.Identity()
 
     def forward(self, x):
         x = self.conv(x)
-        x = self.bn(x)
         x = self.upsample(x)
         return x
+
 
     def initialize_weights_with_regression(self, input_tensor, output_tensor):
         """
@@ -100,7 +99,14 @@ class StitchingModel(nn.Module):
         self.num_channels_model1, shape_model1 = self._get_num_channels(self.part1_model1)
         self.num_channels_model2, shape_model2 = self._get_num_channels(self.part1_model2)
 
-        #print(f"num_output_channels: {self.num_channels_model1}, num_input_channels: {self.num_channels_model2}")
+        if len(shape_model1) == 2 or len(shape_model1) == 3:
+            shape_model1 = (shape_model1[0], shape_model1[1], 1, 1)
+        if len(shape_model2) == 2 or len(shape_model1) == 3:
+            shape_model2 = (shape_model2[0], shape_model2[1], 1, 1)
+        # # Debug print statements
+        # print(f"shape_model1: {shape_model1}")
+        # print(f"shape_model2: {shape_model2}")
+        # print(f"num_output_channels: {self.num_channels_model1}, num_input_channels: {self.num_channels_model2}")
 
         # Initialize the stitching layer to adjust channels and dimensions if needed
         self.stitching_layer = StitchingLayer(
@@ -154,6 +160,11 @@ class StitchingModel(nn.Module):
     def initialize_stitching_layer(self, sample_input):
         with torch.no_grad():
             part1_output = self.part1_model1(sample_input)
+            print(f"part1_output shape: {part1_output.shape}")
+            if part1_output.dim() < 4:
+                part1_output = part1_output.view(part1_output.size(0), part1_output.size(1), 1, 1)
+            if part1_output.dim() < 4:
+                raise ValueError("part1_output has less than 4 dimensions.")
             part2_input_dim = get_input_dim(self.part2_model2)
             upscaled_output = nn.functional.interpolate(
                 part1_output,
