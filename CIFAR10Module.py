@@ -1,18 +1,18 @@
-import torch
 from torch import nn, optim
-from pytorch_lightning import LightningModule
+from lightning import LightningModule
 import timm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 class CIFAR10Module(LightningModule):
-    def __init__(self, model_name, learning_rate, weight_decay):
+    def __init__(self, model_name, learning_rate, weight_decay, num_workers):
         super().__init__()
         self.save_hyperparameters()
         self.model = timm.create_model(model_name, pretrained=False, num_classes=10)
         self.criterion = nn.CrossEntropyLoss()
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.num_workers = num_workers
 
     def forward(self, x):
         return self.model(x)

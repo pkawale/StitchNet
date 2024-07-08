@@ -1,16 +1,10 @@
 import argparse
 import os
 import torch
-from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 import timm
 from torch import nn, optim
 from torchviz import make_dot
 from tqdm import tqdm
-from torchvision import transforms as T
-
-from CIFAR10Data import CIFAR10Data
-from CIFAR10Module import CIFAR10Module
 from stitching_layer import StitchingModel
 from utils import setup_logging
 from plotter import plot_stitching_penalty
@@ -197,65 +191,8 @@ def main(
     learning_rate,
     weight_decay,
 ):
-    seed_everything(0)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(
-        map(str, range(torch.cuda.device_count()))
-    )
 
-    checkpoint = ModelCheckpoint(monitor="val_loss", mode="min", save_last=False)
-    lr_monitor = LearningRateMonitor(logging_interval="step")
-
-    trainer = Trainer(
-        fast_dev_run=bool(dev),
-        logger=None if bool(dev + test_phase) else None,
-        devices="auto",
-        accelerator="gpu",
-        deterministic=True,
-        log_every_n_steps=1,
-        max_epochs=num_epochs,
-        callbacks=[checkpoint, lr_monitor],
-        precision=precision,
-    )
-
-    # Add data augmentation for training data
-    train_transform = T.Compose(
-        [
-            T.RandomCrop(32, padding=4),
-            T.RandomHorizontalFlip(),
-            T.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.2),
-            T.RandomRotation(15),
-            T.ToTensor(),
-            T.Normalize((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616)),
-        ]
-    )
-
-    val_transform = T.Compose(
-        [T.ToTensor(), T.Normalize((0.4914, 0.4822, 0.4465), (0.2471, 0.2435, 0.2616))]
-    )
-
-    data_module = CIFAR10Data(
-        data_dir,
-        batch_size,
-        num_workers,
-        pin_memory,
-        train_transform=train_transform,
-        val_transform=val_transform,
-    )
-    data_module.prepare_data()
-    data_module.setup(stage="fit")
-
-    model = CIFAR10Module(
-        model_name=model1_name, learning_rate=learning_rate, weight_decay=weight_decay
-    ).to(device)
-
-    if bool(test_phase):
-        data_module.setup(stage="test")
-        trainer.test(model, data_module.test_dataloader())
-        return
-
-    trainer.fit(model, data_module.train_dataloader(), data_module.val_dataloader())
-    trainer.test(model, data_module.test_dataloader())
+    # TODO - load pretrained models
 
     # Original stitching code starts here
 
