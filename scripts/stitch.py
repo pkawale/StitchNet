@@ -116,6 +116,7 @@ def main(
     # results before regression
     results["part1_model1_state_dict"] = stitching_model.part1_model1.state_dict()
     results["part2_model2_state_dict"] = stitching_model.part2_model2.state_dict()
+    results["stitching_layer_state_dict"] = stitching_model.stitching_layer.state_dict()
 
     sample_input, _ = next(iter(CIFAR10Module.train_dataloader()))
     sample_input = sample_input[0]
@@ -128,6 +129,9 @@ def main(
     )
     results["part2_model2_state_dict_after_regression"] = (
         stitching_model.part2_model2.state_dict()
+    )
+    results["stitching_layer_state_dict_after_regression"] = (
+        stitching_model.stitching_layer.state_dict()
     )
 
     criterion = nn.CrossEntropyLoss()
