@@ -10,13 +10,16 @@ class StitchingLayer(nn.Module):
     def __init__(self, input_dim, output_dim, input_size, output_size):
         super(StitchingLayer, self).__init__()
         self.conv = nn.Conv2d(input_dim, output_dim, kernel_size=1)
-        self.upsample = nn.Upsample(size=output_size, mode='bilinear', align_corners=False) if input_size != output_size else nn.Identity()
+        self.upsample = (
+            nn.Upsample(size=output_size, mode="bilinear", align_corners=False)
+            if input_size != output_size
+            else nn.Identity()
+        )
 
     def forward(self, x):
         x = self.conv(x)
         x = self.upsample(x)
         return x
-
 
     def initialize_weights_with_regression(self, input_tensor, output_tensor):
         """
@@ -73,16 +76,14 @@ class StitchingLayer(nn.Module):
             .view(output_dim, input_dim, 1, 1)
             .to(final_device)
         )
-        self.conv.bias.data = torch.tensor(reg.intercept_, dtype=torch.float32).to(final_device)
+        self.conv.bias.data = torch.tensor(reg.intercept_, dtype=torch.float32).to(
+            final_device
+        )
 
 
 class StitchingModel(nn.Module):
-    def __init__(self, model1_name, model2_name, split1, split2):
+    def __init__(self, model1, model2, split1, split2):
         super(StitchingModel, self).__init__()
-
-        # Load the pre-trained models
-        self.model1 = self.create_cifar10_resnet(model1_name)
-        self.model2 = self.create_cifar10_resnet(model2_name)
 
         # Split the models into two parts
         self.part1_model1 = nn.Sequential(*list(self.model1.children())[:split1])
@@ -96,32 +97,24 @@ class StitchingModel(nn.Module):
             raise ValueError(f"Model2 part2 is empty with split index {split2}")
 
         # Get number of channels and dimensions
-        self.num_channels_model1, shape_model1 = self._get_num_channels(self.part1_model1)
-        self.num_channels_model2, shape_model2 = self._get_num_channels(self.part1_model2)
+        self.num_channels_model1, shape_model1 = self._get_num_channels(
+            self.part1_model1
+        )
+        self.num_channels_model2, shape_model2 = self._get_num_channels(
+            self.part1_model2
+        )
 
         if len(shape_model1) == 2 or len(shape_model1) == 3:
             shape_model1 = (shape_model1[0], shape_model1[1], 1, 1)
         if len(shape_model2) == 2 or len(shape_model1) == 3:
             shape_model2 = (shape_model2[0], shape_model2[1], 1, 1)
-        # # Debug print statements
-        # print(f"shape_model1: {shape_model1}")
-        # print(f"shape_model2: {shape_model2}")
-        # print(f"num_output_channels: {self.num_channels_model1}, num_input_channels: {self.num_channels_model2}")
-
         # Initialize the stitching layer to adjust channels and dimensions if needed
         self.stitching_layer = StitchingLayer(
             self.num_channels_model1,
             self.num_channels_model2,
             (shape_model1[2], shape_model1[3]),
-            (shape_model2[2], shape_model2[3])
+            (shape_model2[2], shape_model2[3]),
         )
-
-    def create_cifar10_resnet(self, model_name):
-        model = create_model(model_name, pretrained=True)
-        model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        model.maxpool = nn.Identity()
-        model.fc = nn.Linear(model.fc.in_features, 10)
-        return model
 
     def _get_num_channels(self, mdl):
         if len(list(mdl.children())) == 0:
@@ -138,13 +131,9 @@ class StitchingModel(nn.Module):
         return num_output_channels, output_shape
 
     def forward(self, x):
-        #print(f"Input shape: {x.shape}")
         x = self.part1_model1(x)
-        #print(f"After part1_model1: {x.shape}")
         x = self.stitching_layer(x)
-        #print(f"After stitching_layer: {x.shape}")
         x = self.part2_model2(x)
-        #print(f"After part2_model2: {x.shape}")
         return x
 
     def parameter_part1(self):
@@ -160,9 +149,10 @@ class StitchingModel(nn.Module):
     def initialize_stitching_layer(self, sample_input):
         with torch.no_grad():
             part1_output = self.part1_model1(sample_input)
-            print(f"part1_output shape: {part1_output.shape}")
             if part1_output.dim() < 4:
-                part1_output = part1_output.view(part1_output.size(0), part1_output.size(1), 1, 1)
+                part1_output = part1_output.view(
+                    part1_output.size(0), part1_output.size(1), 1, 1
+                )
             if part1_output.dim() < 4:
                 raise ValueError("part1_output has less than 4 dimensions.")
             part2_input_dim = get_input_dim(self.part2_model2)
@@ -185,8 +175,10 @@ if __name__ == "__main__":
     split2 = 6
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    stitching_model = StitchingModel(model1_name, model2_name, split1, split2).to(device)
-    #print(stitching_model)
+    stitching_model = StitchingModel(model1_name, model2_name, split1, split2).to(
+        device
+    )
+    # print(stitching_model)
 
     # Debugging with a dummy input
     dummy_input = torch.randn(1, 3, 32, 32).to(device)
