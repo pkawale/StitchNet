@@ -3,6 +3,7 @@ certifi
 matplotlib
 numpy<2.0.0
 pandas
+psutil
 python-dotenv
 scikit-learn
 seaborn

@@ -46,7 +46,7 @@ def main(
     )
 
     trainer = Trainer(
-        devices=1,
+        devices="auto",
         accelerator="gpu",
         strategy="auto",
         log_every_n_steps=1,
