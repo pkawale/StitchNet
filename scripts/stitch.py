@@ -1,17 +1,17 @@
 from pathlib import Path
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping
 from torch import nn, optim
 from torchvision import transforms, datasets
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 
 from CIFAR10Module import CIFAR10Module
-from StitchingModule import LightningStitchingModel
+from StitchingModule import LightningStitchingModule
 from stitching_layer import StitchingModel
 from utils import find_checkpoint_for_model
 
@@ -21,20 +21,6 @@ results = {
     "before_training": {},
     "after_training": {},
 }
-
-
-def save_results_metadata(results, model1, model2):
-    results["init"]["model1_state_dict"] = model1.state_dict()
-    results["init"]["model2_state_dict"] = model2.state_dict()
-
-    results["after_regression"]["model1_state_dict"] = model1.state_dict()
-    results["after_regression"]["model2_state_dict"] = model2.state_dict()
-
-    results["before_training"]["model1_state_dict"] = model1.state_dict()
-    results["before_training"]["model2_state_dict"] = model2.state_dict()
-
-    results["after_training"]["model1_state_dict"] = model1.state_dict()
-    results["after_training"]["model2_state_dict"] = model2.state_dict()
 
 
 def snapshot(model, description):
@@ -61,7 +47,7 @@ def do_linear_regression(stitching_model, device):
     transform = transforms.Compose(
         [
             transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5)),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ]
     )
     train_dataset = datasets.CIFAR10(
@@ -77,9 +63,7 @@ def main(model1_name, model2_name, split1, split2, log_dir, num_epochs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model1, model2 = load_models(model1_name, model2_name, log_dir)
-    stitching_lightning_model = LightningStitchingModel(
-        model1, model2, split1, split2
-    ).to(device)
+    stitching_lightning_model = LightningStitchingModule(model1, model2, split1, split2)
 
     log_dir = Path(log_dir) / "stitching_logs"
     log_dir.mkdir(exist_ok=True, parents=True)
@@ -100,28 +84,11 @@ def main(model1_name, model2_name, split1, split2, log_dir, num_epochs):
 
     trainer = pl.Trainer(
         max_epochs=num_epochs,
-        gpus=1 if torch.cuda.is_available() else 0,
         logger=logger,
         callbacks=[early_stopping, checkpoint_callback],
-        progress_bar_refresh_rate=20,
     )
 
-    transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5)),
-        ]
-    )
-    train_dataset = datasets.CIFAR10(
-        root="./data", train=True, download=True, transform=transform
-    )
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
-    val_dataset = datasets.CIFAR10(
-        root="./data", train=False, download=True, transform=transform
-    )
-    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4)
-
-    trainer.fit(stitching_lightning_model, train_loader, val_loader)
+    trainer.fit(stitching_lightning_model, CIFAR10Module.train_loader())
     torch.save(stitching_lightning_model.state_dict(), log_dir / "stitched_model.pth")
 
 
