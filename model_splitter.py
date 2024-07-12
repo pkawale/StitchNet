@@ -34,11 +34,18 @@ def get_output_dim(part):
         raise ValueError("The last layer is neither Conv2d nor Linear.")
 
 
-def get_input_dim(part):
-    for layer in part.modules():
-        if isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
-            dim = (
-                layer.in_channels if isinstance(layer, nn.Conv2d) else layer.in_features
-            )
-            return dim
+def get_input_dim(model):
+    for layer in model.children():
+        if hasattr(layer, "in_channels"):
+            return layer.in_channels
+        elif hasattr(layer, "in_features"):
+            return layer.in_features
+        elif isinstance(layer, nn.Sequential) or isinstance(layer, nn.ModuleList):
+            for sublayer in layer:
+                if hasattr(sublayer, "in_channels"):
+                    return sublayer.in_channels
+                elif hasattr(sublayer, "in_features"):
+                    return sublayer.in_features
+        elif isinstance(layer, nn.Module):
+            return get_input_dim(layer)
     raise AttributeError("No layer with 'in_channels' or 'in_features' found")
