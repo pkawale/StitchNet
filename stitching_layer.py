@@ -102,28 +102,29 @@ class StitchingModel(nn.Module):
 
         # Get number of channels and dimensions
         self.num_channels_model1, shape_model1 = self._get_num_channels(
-            self.part1_model1
+            self.part1_model1, (4, 3, 32, 32)
         )
         self.num_channels_model2, shape_model2 = self._get_num_channels(
-            self.part1_model2
+            self.part1_model2, (4, 3, 32, 32)
         )
 
         # Initialize the stitching layer to adjust channels and dimensions if needed
         self.stitching_layer = StitchingLayer(
             self.num_channels_model1,
             self.num_channels_model2,
-            (shape_model1[2], shape_model1[3]),
-            (shape_model2[2], shape_model2[3]),
+            shape_model1,
+            shape_model2,
         )
 
-    def _get_num_channels(self, mdl):
+    def _get_num_channels(self, mdl, input_shape=(4, 3, 32, 32)):
         if len(list(mdl.children())) == 0:
             raise ValueError("One of the model parts is empty.")
 
         with torch.no_grad():
-            # Forward pass through part1 to get the output shape
-            x = torch.randn(4, 3, 32, 32).to(next(mdl.parameters()).device)
-            x = mdl(x)
+            # Forward pass through mdl to get the output shape
+            x = torch.randn(*input_shape).to(next(mdl.parameters()).device)
+            for layer in mdl.children():
+                x = layer(x)
             num_output_channels = x.shape[1]
             output_shape = x.shape
 
