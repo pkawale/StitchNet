@@ -17,6 +17,10 @@ class StitchingLayer(nn.Module):
         )
 
     def forward(self, x):
+        # Check if input tensor has 4 dimensions
+        if len(x.shape) != 4:
+            raise ValueError("Input tensor must have 4 dimensions (batch, channels, height, width).")
+
         x = self.conv(x)
         x = self.upsample(x)
         return x
@@ -86,9 +90,9 @@ class StitchingModel(nn.Module):
         super(StitchingModel, self).__init__()
 
         # Split the models into two parts
-        self.part1_model1 = nn.Sequential(*list(self.model1.children())[:split1])
-        self.part2_model2 = nn.Sequential(*list(self.model2.children())[split2:])
-        self.part1_model2 = nn.Sequential(*list(self.model2.children())[:split2])
+        self.part1_model1 = nn.Sequential(*list(model1.children())[:split1])
+        self.part2_model2 = nn.Sequential(*list(model2.children())[split2:])
+        self.part1_model2 = nn.Sequential(*list(model2.children())[:split2])
 
         if len(list(self.part1_model1.children())) == 0:
             raise ValueError(f"Model1 part1 is empty with split index {split1}")
@@ -104,10 +108,6 @@ class StitchingModel(nn.Module):
             self.part1_model2
         )
 
-        if len(shape_model1) == 2 or len(shape_model1) == 3:
-            shape_model1 = (shape_model1[0], shape_model1[1], 1, 1)
-        if len(shape_model2) == 2 or len(shape_model1) == 3:
-            shape_model2 = (shape_model2[0], shape_model2[1], 1, 1)
         # Initialize the stitching layer to adjust channels and dimensions if needed
         self.stitching_layer = StitchingLayer(
             self.num_channels_model1,
@@ -122,9 +122,8 @@ class StitchingModel(nn.Module):
 
         with torch.no_grad():
             # Forward pass through part1 to get the output shape
-            x = torch.randn(1, 3, 32, 32).to(next(mdl.parameters()).device)
-            for layer in mdl:
-                x = layer(x)
+            x = torch.randn(4, 3, 32, 32).to(next(mdl.parameters()).device)
+            x = mdl(x)
             num_output_channels = x.shape[1]
             output_shape = x.shape
 
@@ -132,7 +131,11 @@ class StitchingModel(nn.Module):
 
     def forward(self, x):
         x = self.part1_model1(x)
+        if x.dim() != 4:
+            raise ValueError("Output of part1_model1 must have 4 dimensions.")
         x = self.stitching_layer(x)
+        if x.dim() != 4:
+            raise ValueError("Output of stitching_layer must have 4 dimensions.")
         x = self.part2_model2(x)
         return x
 
@@ -150,36 +153,13 @@ class StitchingModel(nn.Module):
         with torch.no_grad():
             part1_output = self.part1_model1(sample_input)
             if part1_output.dim() < 4:
-                part1_output = part1_output.view(
-                    part1_output.size(0), part1_output.size(1), 1, 1
-                )
+                part1_output = part1_output.view(part1_output.size(0), part1_output.size(1), 1, 1)
             if part1_output.dim() < 4:
                 raise ValueError("part1_output has less than 4 dimensions.")
-            part2_input_dim = get_input_dim(self.part2_model2)
             upscaled_output = nn.functional.interpolate(
                 part1_output,
                 size=(part1_output.size(2), part1_output.size(3)),
                 mode="bilinear",
                 align_corners=False,
             )
-            self.stitching_layer.initialize_weights_with_regression(
-                part1_output, upscaled_output
-            )
-
-
-# Example usage
-if __name__ == "__main__":
-    model1_name = "resnet18"
-    model2_name = "resnet34"
-    split1 = 6
-    split2 = 6
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    stitching_model = StitchingModel(model1_name, model2_name, split1, split2).to(
-        device
-    )
-    # print(stitching_model)
-
-    # Debugging with a dummy input
-    dummy_input = torch.randn(1, 3, 32, 32).to(device)
-    stitching_model(dummy_input)
+            self.stitching_layer.initialize_weights_with_regression(part1_output, upscaled_output)

@@ -1,4 +1,7 @@
 import os
+from glob import glob
+from pathlib import Path
+
 import certifi
 import logging
 import torch
@@ -72,3 +75,18 @@ def load_dataset(batch_size=64, num_workers=4, pin_memory=True):
     return train_loader, test_loader
 
 
+def find_checkpoint_for_model(log_dir: Path, model_name: str) -> Path:
+    # cannot see /checkpoint in virtualenv
+    checkpoint_dir = list(glob(str(log_dir / f"{model_name}_*" / "checkpoints")))
+    if len(checkpoint_dir) == 0:
+        raise ValueError(f"Model {model_name} not found in {log_dir}")
+    # elif len(checkpoint_dir) > 1:
+    #     raise ValueError(f"Multiple models found in {log_dir}")
+    checkpoint_dir = Path(checkpoint_dir[0])
+    list_of_files = list(checkpoint_dir.glob("*.ckpt"))
+    if len(list_of_files) == 0:
+        raise ValueError(f"No checkpoint found for {model_name}")
+    elif len(list_of_files) > 1:
+        # M3: TODO - return 'best' or 'last' or let user pick
+        raise ValueError(f"Multiple checkpoints found for {model_name}")
+    return list_of_files[0]

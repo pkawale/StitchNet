@@ -1,3 +1,4 @@
+import torch
 from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks import (
     LearningRateMonitor,
@@ -7,6 +8,7 @@ from lightning.pytorch.callbacks import (
 from lightning.pytorch.loggers import TensorBoardLogger
 from pathlib import Path
 from datetime import datetime
+
 from CIFAR10Data import CIFAR10Data
 from CIFAR10Module import CIFAR10Module
 
@@ -23,6 +25,7 @@ def main(
     seed: int = 24682479,
 ):
     run_logs = Path(log_dir) / f"{model_name}_{datetime.now()}_logs"
+    run_logs.mkdir(parents=True, exist_ok=True)
     # TODO - break early if model with same hyperparams exists
 
     checkpoint = ModelCheckpoint(
@@ -69,6 +72,13 @@ def main(
 
     trainer.fit(model, data_module.train_dataloader(), data_module.val_dataloader())
 
+    # Save the model parameters
+    torch.save({
+        'model_name': model_name,
+        'learning_rate': learning_rate,
+        'weight_decay': weight_decay,
+        'state_dict': model.state_dict()
+    }, run_logs / "model_final.pth")
 
 if __name__ == "__main__":
     import argparse

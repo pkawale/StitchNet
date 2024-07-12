@@ -1,107 +1,51 @@
-from safetensors import torch
-from tensorboardX import SummaryWriter
-from torch import nn, optim
-from tqdm import tqdm
-
-from CIFAR10Module import CIFAR10Module
-from glob import glob
 from pathlib import Path
 
+import pytorch_lightning as pl
+import torch
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import EarlyStopping
+from torch import nn, optim
+from torchvision import transforms, datasets
+from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
+
+from CIFAR10Module import CIFAR10Module
+from StitchingModule import LightningStitchingModel
 from stitching_layer import StitchingModel
+from utils import find_checkpoint_for_model
+
+results = {
+    "init": {},
+    "after_regression": {},
+    "before_training": {},
+    "after_training": {},
+}
 
 
-def train(
-    model,
-    train_loader,
-    criterion,
-    optimizer,
-    num_epochs=10,
-    logger=None,
-    scheduler=None,
-):
-    model.train()
-    scaler = torch.cuda.amp.GradScaler()
-    epoch_losses = []
+def save_results_metadata(results, model1, model2):
+    results["init"]["model1_state_dict"] = model1.state_dict()
+    results["init"]["model2_state_dict"] = model2.state_dict()
 
-    for epoch in range(num_epochs):
-        running_loss = 0.0
-        for images, labels in tqdm(
-            train_loader, desc=f"Training Epoch {epoch + 1}/{num_epochs}"
-        ):
-            images, labels = images, labels
-            optimizer.zero_grad()
+    results["after_regression"]["model1_state_dict"] = model1.state_dict()
+    results["after_regression"]["model2_state_dict"] = model2.state_dict()
 
-            with torch.cuda.amp.autocast():
-                # Forward pass
-                outputs = model(images)
-                loss = criterion(outputs, labels)
+    results["before_training"]["model1_state_dict"] = model1.state_dict()
+    results["before_training"]["model2_state_dict"] = model2.state_dict()
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-
-            running_loss += loss.item()
-
-        epoch_loss = running_loss / len(train_loader)
-        epoch_losses.append(epoch_loss)
-        if scheduler:
-            scheduler.step(epoch_loss)
-        if logger:
-            logger.info(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {epoch_loss:.4f}")
-        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {epoch_loss:.4f}")
-    return epoch_losses
+    results["after_training"]["model1_state_dict"] = model1.state_dict()
+    results["after_training"]["model2_state_dict"] = model2.state_dict()
 
 
-def test(model, test_loader, criterion, device, logger=None):
-    model.eval()
-    total = 0
-    correct = 0
-    test_loss = 0.0
-    with torch.no_grad():
-        for images, labels in tqdm(test_loader, desc="Testing"):
-            images, labels = images, labels
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-            test_loss += loss.item()
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    accuracy = 100 * correct / total
-    avg_loss = test_loss / len(test_loader)
-    if logger:
-        logger.info(f"Test Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
-    print(f"Test Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%")
-    return avg_loss, accuracy
+def snapshot(model, description):
+    return {
+        "description": description,
+        "state_dict": model.state_dict(),
+    }
 
 
-def find_checkpoint_for_model(log_dir: Path, model_name: str) -> Path:
-    checkpoint_dir = list(glob(str(log_dir / f"{model_name}_*" / "checkpoints")))
-    if len(checkpoint_dir) == 0:
-        raise ValueError(f"Model {model_name} not found in {log_dir}")
-    elif len(checkpoint_dir) > 1:
-        raise ValueError(f"Multiple models found in {log_dir}")
-    checkpoint_dir = Path(checkpoint_dir[0])
-    list_of_files = list(checkpoint_dir.glob("*.ckpt"))
-    if len(list_of_files) == 0:
-        raise ValueError(f"No checkpoint found for {model_name}")
-    elif len(list_of_files) > 1:
-        # M3: TODO - return 'best' or 'last' or let user pick
-        raise ValueError(f"Multiple checkpoints found for {model_name}")
-    return list_of_files[0]
-
-
-def main(
-    model1_name,
-    model2_name,
-    index1,
-    index2,
-    log_dir,
-):
-    # we are pretraining model1 and model2 and saving them in the checkpoints in train.py
-    # we are loading the pre-trained model1 and model2 here
+def load_models(model1_name, model2_name, log_dir):
     # Load the pre-existing model from log_dir
-
     checkpoint_path = find_checkpoint_for_model(log_dir, model1_name)
     print("[INFO]: loading model1 from", checkpoint_path)
     model1 = CIFAR10Module.load_from_checkpoint(checkpoint_path)
@@ -110,69 +54,81 @@ def main(
     print("[INFO]: loading model2 from", checkpoint_path)
     model2 = CIFAR10Module.load_from_checkpoint(checkpoint_path)
 
-    results = {}
-    stitching_model = StitchingModel(model1, model2, index1, index2)
+    return model1, model2
 
-    # results before regression
-    results["part1_model1_state_dict"] = stitching_model.part1_model1.state_dict()
-    results["part2_model2_state_dict"] = stitching_model.part2_model2.state_dict()
-    results["stitching_layer_state_dict"] = stitching_model.stitching_layer.state_dict()
 
-    sample_input, _ = next(iter(CIFAR10Module.train_dataloader()))
-    sample_input = sample_input[0]
-
-    stitching_model.initialize_stitching_layer(sample_input)
-
-    # results after regression and initialization in results
-    results["part1_model1_state_dict_after_regression"] = (
-        stitching_model.part1_model1.state_dict()
+def do_linear_regression(stitching_model, device):
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5)),
+        ]
     )
-    results["part2_model2_state_dict_after_regression"] = (
-        stitching_model.part2_model2.state_dict()
+    train_dataset = datasets.CIFAR10(
+        root="./data", train=True, download=True, transform=transform
     )
-    results["stitching_layer_state_dict_after_regression"] = (
-        stitching_model.stitching_layer.state_dict()
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
+    batch_im, _ = next(iter(train_loader))
+    batch_im = batch_im.to(device)
+    stitching_model.initialize_stitching_layer(batch_im)
+
+
+def main(model1_name, model2_name, split1, split2, log_dir, num_epochs):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model1, model2 = load_models(model1_name, model2_name, log_dir)
+    stitching_lightning_model = LightningStitchingModel(
+        model1, model2, split1, split2
+    ).to(device)
+
+    log_dir = Path(log_dir) / "stitching_logs"
+    log_dir.mkdir(exist_ok=True, parents=True)
+
+    checkpoint_callback = ModelCheckpoint(
+        monitor="val_loss",
+        dirpath=log_dir,
+        filename="best-checkpoint",
+        save_top_k=1,
+        mode="min",
     )
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(stitching_model.parameters(), lr=0.001)
+    early_stopping = EarlyStopping(
+        monitor="val_loss", patience=3, verbose=True, mode="min"
+    )
 
-    # TensorBoard logger
-    log_folder = Path(log_dir) / "logs" / "stitched_model_{model1_name}_{model2_name}"
-    log_folder.mkdir(parents=True, exist_ok=True)
-    writer = SummaryWriter(log_folder)
+    logger = TensorBoardLogger(save_dir=log_dir, name="lightning_logs")
 
-    # Training and testing the stitching model
-    num_epochs = 10  # Set the number of epochs
-    for epoch in range(num_epochs):
-        train_loss = train(
-            stitching_model,
-            CIFAR10Module.train_dataloader(),
-            criterion,
-            optimizer,
-            num_epochs=num_epochs,
-            logger=writer,
-        )
-        test_loss, test_accuracy = test(
-            stitching_model, CIFAR10Module.test_dataloader(), criterion, logger=writer
-        )
+    trainer = pl.Trainer(
+        max_epochs=num_epochs,
+        gpus=1 if torch.cuda.is_available() else 0,
+        logger=logger,
+        callbacks=[early_stopping, checkpoint_callback],
+        progress_bar_refresh_rate=20,
+    )
 
-        results[f"epoch_{epoch + 1}"] = {
-            "train_loss": train_loss[-1],
-            "test_loss": test_loss,
-            "test_accuracy": test_accuracy,
-        }
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5)),
+        ]
+    )
+    train_dataset = datasets.CIFAR10(
+        root="./data", train=True, download=True, transform=transform
+    )
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
+    val_dataset = datasets.CIFAR10(
+        root="./data", train=False, download=True, transform=transform
+    )
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4)
 
-    # Save the final model
-    torch.save(stitching_model.state_dict(), log_folder / "final_stitched_model.pt")
-    writer.close()
+    trainer.fit(stitching_lightning_model, train_loader, val_loader)
+    torch.save(stitching_lightning_model.state_dict(), log_dir / "stitched_model.pth")
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Stitching Model Training Script")
-
+    parser = argparse.ArgumentParser(description="Stitching Model Creation Script")
     parser.add_argument(
         "--model1_name", type=str, required=True, help="Name of the first model"
     )
@@ -197,7 +153,9 @@ if __name__ == "__main__":
         required=True,
         help="Directory to store logs and checkpoints",
     )
-
+    parser.add_argument(
+        "--num_epochs", type=int, default=10, help="Number of epochs to train the model"
+    )
     args = parser.parse_args()
 
     main(
@@ -206,4 +164,5 @@ if __name__ == "__main__":
         args.index1,
         args.index2,
         args.log_dir,
+        args.num_epochs,
     )
