@@ -1,4 +1,5 @@
 import torch
+from timm import create_model
 from torch.nn import CrossEntropyLoss
 from torch.optim import Adam
 import pytorch_lightning as pl
@@ -6,9 +7,9 @@ import pytorch_lightning as pl
 from stitching_layer import StitchingModel
 
 
-class LightningStitchingModel(pl.LightningModule):
+class LightningStitchingModule(pl.LightningModule):
     def __init__(self, model1, model2, split1, split2):
-        super(LightningStitchingModel, self).__init__()
+        super(LightningStitchingModule, self).__init__()
         self.stitching_model = StitchingModel(model1, model2, split1, split2)
         self.criterion = CrossEntropyLoss()
 
