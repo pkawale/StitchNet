@@ -9,8 +9,8 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from pathlib import Path
 from datetime import datetime
 
-from CIFAR10Data import CIFAR10Data
-from CIFAR10Module import CIFAR10Module
+from helper_scripts.CIFAR10Data import CIFAR10Data
+from helper_scripts.CIFAR10Module import CIFAR10Module
 
 
 def main(

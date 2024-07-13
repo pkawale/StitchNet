@@ -46,13 +46,13 @@ def load_dataset(batch_size=64, num_workers=4, pin_memory=True):
         ]
     )
     cifar10_train = datasets.CIFAR10(
-        root=os.path.join(os.getenv("DATA_DIR", "data"), "cifar10"),
+        root=os.path.join(os.getenv("DATA_DIR", "../data"), "cifar10"),
         train=True,
         download=True,
         transform=transform,
     )
     cifar10_test = datasets.CIFAR10(
-        root=os.path.join(os.getenv("DATA_DIR", "data"), "cifar10"),
+        root=os.path.join(os.getenv("DATA_DIR", "../data"), "cifar10"),
         train=False,
         download=True,
         transform=transform,

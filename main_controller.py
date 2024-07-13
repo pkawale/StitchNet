@@ -1,12 +1,11 @@
 import argparse
-import os
 import torch
 from torch import nn, optim
 from torchviz import make_dot
 from tqdm import tqdm
 from glob import glob
 from pathlib import Path
-from CIFAR10Module import CIFAR10Module
+from helper_scripts.CIFAR10Module import CIFAR10Module
 from stitching_layer import StitchingModel
 
 
