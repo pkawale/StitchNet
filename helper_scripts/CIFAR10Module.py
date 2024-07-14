@@ -6,6 +6,8 @@ from torchmetrics import Accuracy
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchvision import transforms, datasets
 
+from helper_scripts.utils import load_dataset
+
 
 class CIFAR10Module(pl.LightningModule):
     def __init__(self, model_name, learning_rate, weight_decay):
@@ -57,44 +59,27 @@ class CIFAR10Module(pl.LightningModule):
             "monitor": "val_loss",
         }
 
-    def train_dataloader(self):
+    def create_dataloader(self, train = True):
         transform = transforms.Compose(
             [
                 transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                transforms.Normalize((0.5,0.5, 0.5), (0.5, 0.5, 0.5)),
             ]
         )
         dataset = datasets.CIFAR10(
-            root="./data", train=True, download=True, transform=transform
+            root="./data", train=train, download=True, transform=transform
         )
-        train_loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
-        return train_loader
+        loader = DataLoader(dataset, batch_size=32, shuffle=train, num_workers=4)
+        return loader
+
+    def train_dataloader(self):
+        return load_dataset(batch_size=32, num_workers=4, pin_memory=True, train=True)
 
     def val_dataloader(self):
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]
-        )
-        dataset = datasets.CIFAR10(
-            root="./data", train=False, download=True, transform=transform
-        )
-        val_loader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=4)
-        return val_loader
+        return load_dataset(batch_size=32, num_workers=4, pin_memory=True, train=False)
 
     def test_dataloader(self):
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]
-        )
-        dataset = datasets.CIFAR10(
-            root="./data", train=False, download=True, transform=transform
-        )
-        test_loader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=4)
-        return test_loader
+        return load_dataset(batch_size=32, num_workers=4, pin_memory=True, train=False)
 
     def children(self, *args, **kwargs):
         return self.model.children(*args, **kwargs)

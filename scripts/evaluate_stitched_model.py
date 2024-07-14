@@ -25,7 +25,14 @@ def load_models(model1_name, model2_name, log_dir):
 
 def load_stitched_model(stitched_model_path, model1, model2, split1, split2, device):
     stitching_model = StitchingModel(model1, model2, split1, split2)
-    stitching_model.load_state_dict(torch.load(stitched_model_path))
+    state_dict = torch.load(stitched_model_path, map_location=device)
+    print(f"Keys in the loaded state dict: {state_dict.keys()}")
+
+    # Adjust the key based on the actual state dict structure
+    if 'model' in state_dict:
+        stitching_model.load_state_dict(state_dict['model'])
+    else:
+        stitching_model.load_state_dict(state_dict)
     return stitching_model.to(device)
 
 
