@@ -1,9 +1,6 @@
 import torch
-from timm import create_model
 from torch import nn
 from sklearn.linear_model import LinearRegression
-
-from model_splitter import get_input_dim
 
 
 class StitchingLayer(nn.Module):
@@ -123,8 +120,10 @@ class StitchingModel(nn.Module):
         with torch.no_grad():
             # Forward pass through mdl to get the output shape
             x = torch.randn(*input_shape).to(next(mdl.parameters()).device)
+
             for layer in mdl.children():
-                x = layer(x)
+                if isinstance(layer, nn.Module) and not isinstance(layer, (nn.CrossEntropyLoss, nn.MSELoss, nn.L1Loss)):
+                    x = layer(x)
             num_output_channels = x.shape[1]
             output_shape = x.shape
 

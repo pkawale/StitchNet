@@ -3,7 +3,7 @@ import torch
 from torch import nn, optim
 
 from stitching_layer import StitchingModel
-from utils import setup_logging, load_dataset
+from helper_scripts.utils import setup_logging, load_dataset
 from main_controller import train, test
 import matplotlib.pyplot as plt
 

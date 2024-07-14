@@ -6,9 +6,9 @@ from torchvision import transforms, datasets
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
-from CIFAR10Module import CIFAR10Module
+from helper_scripts.CIFAR10Module import CIFAR10Module
 from stitching_layer import StitchingModel
-from utils import find_checkpoint_for_model
+from helper_scripts.utils import find_checkpoint_for_model
 
 
 def load_models(model1_name, model2_name, log_dir):
