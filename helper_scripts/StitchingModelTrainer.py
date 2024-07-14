@@ -35,5 +35,6 @@ class StitchingModelTrainer(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        # BUG: parameters() will train the whole model! We just want to train the stitching layer!
         return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
 

@@ -38,6 +38,8 @@ def setup_logging(model1, model2):
 
 
 def load_dataset(batch_size=64, num_workers=4, pin_memory=True):
+    # BEST-PRACTICES ISSUE: this is repeated code from the data module. Define the dataset once and
+    # re-use it everywhere!
     transform = transforms.Compose(
         [
             transforms.Resize((32, 32)),  # CIFAR-10 image size
