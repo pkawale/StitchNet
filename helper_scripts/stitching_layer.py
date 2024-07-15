@@ -15,9 +15,9 @@ class StitchingModel(LightningModule):
 
         # Sanity-check the model parts equal the model whole after splitting
         dummy_data = torch.randn(4, 3, 32, 32).to(next(self.part1_model1.parameters()).device)
-        assert torch.all(model1(dummy_data) == self.part2_model1(self.part1_model1(dummy_data)))
+        assert torch.all(model1(dummy_data) == self.model1(dummy_data))
         dummy_data = torch.randn(4, 3, 32, 32).to(next(self.part1_model2.parameters()).device)
-        assert torch.all(model2(dummy_data) == self.part2_model2(self.part1_model2(dummy_data)))
+        assert torch.all(model2(dummy_data) == self.model2(dummy_data))
 
         # Get number of channels and dimensions
         self.num_channels_model1, shape_model1 = self._get_num_channels(
@@ -36,6 +36,14 @@ class StitchingModel(LightningModule):
         )
         self.learning_rate = learning_rate
         self.criterion = nn.CrossEntropyLoss()
+
+    @property
+    def model1(self):
+        return nn.Sequential(self.part1_model1, self.part2_model1)
+
+    @property
+    def model2(self):
+        return nn.Sequential(self.part1_model2, self.part2_model2)
 
     def _get_num_channels(self, mdl, input_shape=(4, 3, 32, 32)):
         if len(list(mdl.children())) == 0:
