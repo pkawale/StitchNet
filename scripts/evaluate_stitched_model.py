@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from helper_scripts.CIFAR10Module import CIFAR10Module
-from stitching_layer import StitchingModel
+from helper_scripts.stitching_layer import StitchingModel
 from helper_scripts.utils import find_checkpoint_for_model
 from helper_scripts.CIFAR10Data import CIFAR10Data
 

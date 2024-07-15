@@ -5,7 +5,7 @@ from pytorch_lightning import LightningModule
 
 
 class StitchingModel(LightningModule):
-    def __init__(self, model1, model2, split1, split2):
+    def __init__(self, model1, model2, split1, split2, learning_rate=1e-3):
         super(StitchingModel, self).__init__()
 
         # Split the models into two parts
@@ -34,7 +34,7 @@ class StitchingModel(LightningModule):
             shape_model1,
             shape_model2,
         )
-
+        self.learning_rate = learning_rate
         self.criterion = nn.CrossEntropyLoss()
 
     def _get_num_channels(self, mdl, input_shape=(4, 3, 32, 32)):

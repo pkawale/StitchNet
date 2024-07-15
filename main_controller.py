@@ -6,7 +6,7 @@ from tqdm import tqdm
 from glob import glob
 from pathlib import Path
 from helper_scripts.CIFAR10Module import CIFAR10Module
-from stitching_layer import StitchingModel
+from helper_scripts.stitching_layer import StitchingModel
 
 
 def train(

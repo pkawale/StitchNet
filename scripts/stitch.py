@@ -7,8 +7,7 @@ from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from helper_scripts.CIFAR10Module import CIFAR10Module
-from helper_scripts.StitchingModelModule import StitchingModelModule
-from stitching_layer import StitchingModel
+from helper_scripts.stitching_layer import StitchingModel
 from helper_scripts.CIFAR10Data import CIFAR10Data
 from helper_scripts.utils import find_checkpoint_for_model
 
@@ -117,8 +116,10 @@ def main(
         save_results(results, log_dir, "after_regression")
 
     logger = TensorBoardLogger(save_dir=log_dir, name="stitching_model")
-    lr_monitor = LearningRateMonitor(logging_interval='epoch')
-    early_stopping = EarlyStopping(monitor='val_loss', patience=10, verbose=True, mode='min')
+    lr_monitor = LearningRateMonitor(logging_interval="epoch")
+    early_stopping = EarlyStopping(
+        monitor="val_loss", patience=10, verbose=True, mode="min"
+    )
 
     trainer = pl.Trainer(
         max_epochs=num_epochs,
@@ -129,10 +130,8 @@ def main(
             if torch.cuda.device_count() > 1
             else None
         ),
-        callbacks=[lr_monitor, early_stopping]
+        callbacks=[lr_monitor, early_stopping],
     )
-
-    stitching_module = StitchingModelModule(stitching_model, learning_rate=1e-3)
 
     if not results["before_training"]:
         results["before_training"] = save_model_states(
@@ -140,7 +139,7 @@ def main(
         )
         save_results(results, log_dir, "before_training")
 
-    trainer.fit(stitching_module, datamodule=cifar10_data)
+    trainer.fit(stitching_model, datamodule=cifar10_data)
 
     if not results["after_training"]:
         results["after_training"] = save_model_states(
@@ -162,8 +161,12 @@ def main(
 
     if not results["losses"]:
         # Test models and capture losses
-        results["losses"][f"{model1_name}_loss"] = test_model(model1, cifar10_data, trainer)
-        results["losses"][f"{model2_name}_loss"] = test_model(model2, cifar10_data, trainer)
+        results["losses"][f"{model1_name}_loss"] = test_model(
+            model1, cifar10_data, trainer
+        )
+        results["losses"][f"{model2_name}_loss"] = test_model(
+            model2, cifar10_data, trainer
+        )
         results["losses"]["stitching_model_loss"] = test_model(
             stitching_model, cifar10_data, trainer
         )
