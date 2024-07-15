@@ -39,8 +39,8 @@ def do_linear_regression(stitching_model, datamodule):
 
 
 def test_model(model, datamodule, trainer):
-    test_module = StitchingModelModule(model, learning_rate=1e-3)
-    test_results = trainer.test(test_module, datamodule=datamodule, verbose=False)
+    # test_module = StitchingModel(model, learning_rate=1e-3)
+    test_results = trainer.test(model, datamodule=datamodule, verbose=False)
     print(f"Test results for {model.__class__.__name__}: {test_results}")
     # Assuming the default key for loss in the test results is 'test_loss'
     # Find the key containing the loss
@@ -59,7 +59,7 @@ def train_stitching_layer_and_model2_part2(
         param.requires_grad = False
 
     # Create a module for the stitching model
-    stitching_module = StitchingModelModule(stitching_model, learning_rate=1e-3)
+    stitching_module = StitchingModel(stitching_model, learning_rate=1e-3)
 
     # Train only the stitching layer and the second part of model2
     trainer.fit(stitching_module, datamodule=datamodule)
@@ -86,7 +86,7 @@ def main(
     num_epochs,
     enable_learning,
 ):
-    log_dir = Path(log_dir) / "checkpoints"
+
     # log_dir.mkdir(exist_ok=True, parents=True)
 
     results = load_results(log_dir, "init") or {}
@@ -94,14 +94,14 @@ def main(
     model1 = load_model(model1_name, log_dir)
     model2 = load_model(model2_name, log_dir)
     stitching_model = StitchingModel(model1, model2, split1, split2)
-
+    log_dir = Path(log_dir) / "checkpoints"
     cifar10_data = CIFAR10Data(
         data_dir=data_dir, batch_size=32, num_workers=4, pin_memory=True
     )
     cifar10_data.prepare_data()
     cifar10_data.setup(stage="fit")
 
-    if not results["init"]:
+    if "init" not in results:
         results["init"] = save_model_states(
             model1_name, model1, model2_name, model2, stitching_model
         )
@@ -109,7 +109,7 @@ def main(
 
     do_linear_regression(stitching_model, cifar10_data)
 
-    if not results["after_regression"]:
+    if "after_regression" not in results:
         results["after_regression"] = save_model_states(
             model1_name, model1, model2_name, model2, stitching_model
         )
@@ -133,7 +133,7 @@ def main(
         callbacks=[lr_monitor, early_stopping],
     )
 
-    if not results["before_training"]:
+    if "before_training" not in results:
         results["before_training"] = save_model_states(
             model1_name, model1, model2_name, model2, stitching_model
         )
@@ -141,7 +141,7 @@ def main(
 
     trainer.fit(stitching_model, datamodule=cifar10_data)
 
-    if not results["after_training"]:
+    if "after_training" not in results:
         results["after_training"] = save_model_states(
             model1_name, model1, model2_name, model2, stitching_model
         )
@@ -159,7 +159,7 @@ def main(
             )
             save_results(results, log_dir, "after_training_model2_part2_stitching")
 
-    if not results["losses"]:
+    if "losses" not in results:
         # Test models and capture losses
         results["losses"][f"{model1_name}_loss"] = test_model(
             model1, cifar10_data, trainer
