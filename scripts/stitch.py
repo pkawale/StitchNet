@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import pytorch_lightning as pl
 import torch
+from lightning.pytorch.callbacks import LearningRateMonitor, EarlyStopping
 from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.loggers import TensorBoardLogger
 
@@ -116,6 +117,8 @@ def main(
         save_results(results, log_dir, "after_regression")
 
     logger = TensorBoardLogger(save_dir=log_dir, name="stitching_model")
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
+    early_stopping = EarlyStopping(monitor='val_loss', patience=10, verbose=True, mode='min')
 
     trainer = pl.Trainer(
         max_epochs=num_epochs,
@@ -126,6 +129,7 @@ def main(
             if torch.cuda.device_count() > 1
             else None
         ),
+        callbacks=[lr_monitor, early_stopping]
     )
 
     stitching_module = StitchingModelModule(stitching_model, learning_rate=1e-3)
