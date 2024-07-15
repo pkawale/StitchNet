@@ -1,7 +1,9 @@
 import torch
 from torch import nn
 from sklearn.linear_model import LinearRegression
-from pytorch_lightning import LightningModule
+from lightning.pytorch import LightningModule
+
+from helper_scripts.timm_surgery import split_model
 
 
 class StitchingModel(LightningModule):
@@ -9,9 +11,15 @@ class StitchingModel(LightningModule):
         super(StitchingModel, self).__init__()
 
         # Split the models into two parts
-        self.part1_model1 = nn.Sequential(*list(model1.children())[:split1])
-        self.part2_model2 = nn.Sequential(*list(model2.children())[split2:])
-        self.part1_model2 = nn.Sequential(*list(model2.children())[:split2])
+        self.part1_model1, self.part2_model1 = split_model(model1, split1)
+        self.part2_model1, self.part2_model2 = split_model(model2, split2)
+
+        # Sanity-check the model parts equal the model whole after splitting
+        dummy_data = torch.randn(4, 3, 32, 32).to(next(self.part1_model1.parameters()).device)
+        assert torch.all(model1(dummy_data) == self.model1(dummy_data))
+        dummy_data = torch.randn(4,3, 32, 32).to(next(self.part1_model2.parameters()).device)
+        assert torch.all(model2(dummy_data) == self.model2(dummy_data))
+
 
         if len(list(self.part1_model1.children())) == 0:
             raise ValueError(f"Model1 part1 is empty with split index {split1}")
@@ -36,6 +44,14 @@ class StitchingModel(LightningModule):
         )
         self.learning_rate = learning_rate
         self.criterion = nn.CrossEntropyLoss()
+
+    @property
+    def model1(self):
+        return nn.Sequential(self.part1_model1, self.part2_model1)
+
+    @property
+    def model2(self):
+        return nn.Sequential(self.part1_model2, self.part2_model2)
 
     def _get_num_channels(self, mdl, input_shape=(4, 3, 32, 32)):
         if len(list(mdl.children())) == 0:

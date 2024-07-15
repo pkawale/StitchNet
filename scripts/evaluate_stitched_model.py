@@ -20,7 +20,7 @@ def load_model(model_name, log_dir, device):
 
 def load_stitched_model(model1, model2, split1, split2, log_dir, device):
     stitched_model = StitchingModel(model1, model2, split1, split2)
-    checkpoint_path = log_dir / "checkpoints" / "results.pth"
+    checkpoint_path = log_dir / "checkpoints" / f"results_{model1}_{model2}_{split1}_{split2}.pth"
     results = torch.load(
         checkpoint_path, map_location=device
     )  # Ensure the loaded state_dict is on the correct device
