@@ -88,7 +88,7 @@ def visualize_results(results,model_name, comparison_type="model1_vs_stitched"):
 
     # Batch-wise Loss Comparison
     ax[1, 1].plot(
-        results["batch_losses"]["model1"], label=f"{model_name} Loss", linestyle="--"
+        results["batch_losses"][f"{model_name}"], label=f"{model_name} Loss", linestyle="--"
     )
     ax[1, 1].plot(
         results["batch_losses"]["stitched_model"],
@@ -130,27 +130,27 @@ def main(model1_name, model2_name, split1, split2, log_dir, data_dir):
         calculate_metrics(stitched_model, test_loader, device)
     )
 
-    results["losses"]["model1_loss"] = model1_loss
+    results["losses"][f"{model1_name}_loss"] = model1_loss
     results["losses"]["stitched_model_loss"] = stitched_model_loss
-    results["accuracies"]["model1_accuracy"] = model1_accuracy
+    results["accuracies"][f"{model1_name}_accuracy"] = model1_accuracy
     results["accuracies"]["stitched_model_accuracy"] = stitched_model_accuracy
-    results["batch_losses"]["model1"] = model1_batch_losses
+    results["batch_losses"][f"{model1_name}"] = model1_batch_losses
     results["batch_losses"]["stitched_model"] = stitched_model_batch_losses
     results["after_training"] = results_data["after_training"]
 
-    visualize_results(results, model1_name, comparison_type=f"{model1_name}_vs_stitched")
+    # visualize_results(results, model1_name, comparison_type=f"{model1_name}_vs_stitched")
 
     # Model 2 vs Stitched Model
     model2_loss, model2_accuracy, model2_batch_losses = calculate_metrics(
         model2, test_loader, device
     )
 
-    results["losses"]["model2_loss"] = model2_loss
-    results["accuracies"]["model2_accuracy"] = model2_accuracy
-    results["batch_losses"]["model2"] = model2_batch_losses
+    results["losses"][f"{model2_name}_loss"] = model2_loss
+    results["accuracies"][f"{model2_name}_accuracy"] = model2_accuracy
+    results["batch_losses"][f"{model2_name}"] = model2_batch_losses
 
     # temporary update to add logs in stitch.py first
-    # visualize_results(results, model2_name, comparison_type=f"{model2_name}_vs_stitched")
+    visualize_results(results, model2_name, comparison_type=f"{model1_name}_vs_{model2_name}_vs_stitched")
 
 
 if __name__ == "__main__":
