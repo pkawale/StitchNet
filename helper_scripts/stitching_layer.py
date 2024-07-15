@@ -1,10 +1,11 @@
 import torch
 from torch import nn
 from sklearn.linear_model import LinearRegression
+from pytorch_lightning import LightningModule
 
 
-class StitchingModel(nn.Module):
-    def __init__(self, model1, model2, split1, split2):
+class StitchingModel(LightningModule):
+    def __init__(self, model1, model2, split1, split2, learning_rate=1e-3):
         super(StitchingModel, self).__init__()
 
         # Split the models into two parts
@@ -33,6 +34,8 @@ class StitchingModel(nn.Module):
             shape_model1,
             shape_model2,
         )
+        self.learning_rate = learning_rate
+        self.criterion = nn.CrossEntropyLoss()
 
     def _get_num_channels(self, mdl, input_shape=(4, 3, 32, 32)):
         if len(list(mdl.children())) == 0:
@@ -61,6 +64,38 @@ class StitchingModel(nn.Module):
             raise ValueError("Output of stitching_layer must have 4 dimensions.")
         x = self.part2_model2(x)
         return x
+
+    def training_step(self, batch, batch_idx):
+        images, labels = batch
+        outputs = self(images)
+        loss = self.criterion(outputs, labels)
+        self.log(
+            "train_loss", loss,
+        )
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        images, labels = batch
+        outputs = self(images)
+        loss = self.criterion(outputs, labels)
+        self.log(
+            "val_loss", loss,
+        )
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        images, labels = batch
+        outputs = self(images)
+        loss = self.criterion(outputs, labels)
+        self.log(
+            "test_loss", loss,
+        )
+        return loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(
+            self.stitching_model.stitching_layer.parameters(), lr=self.learning_rate
+        )
 
     def parameter_part1(self):
         yield from self.part1_model1.parameters()

@@ -1,6 +1,6 @@
 from torch import nn, optim
 import pytorch_lightning as pl
-from stitching_layer import StitchingModel
+from helper_scripts.stitching_layer import StitchingModel
 
 class LightningStitchingModule(pl.LightningModule):
     def __init__(self, model1, model2, split1, split2):

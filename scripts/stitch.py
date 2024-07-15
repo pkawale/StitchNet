@@ -2,18 +2,20 @@ import argparse
 from pathlib import Path
 import pytorch_lightning as pl
 import torch
+from lightning.pytorch.callbacks import LearningRateMonitor, EarlyStopping
 from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from helper_scripts.CIFAR10Module import CIFAR10Module
-from helper_scripts.StitchingModelModule import StitchingModelModule
-from stitching_layer import StitchingModel
+from helper_scripts.stitching_layer import StitchingModel
 from helper_scripts.CIFAR10Data import CIFAR10Data
 from helper_scripts.utils import find_checkpoint_for_model
 
 
-def save_model_states(results, stage, model1_name, model1, model2_name,  model2, stitching_model):
-    results[stage] = {
+def save_model_states(
+    model1_name, model1, model2_name, model2, stitching_model
+) -> dict:
+    return {
         f"{model1_name}_state_dict": model1.state_dict(),
         f"{model2_name}_state_dict": model2.state_dict(),
         "stitching_model_state_dict": stitching_model.stitching_layer.state_dict(),
@@ -49,21 +51,49 @@ def test_model(model, datamodule, trainer):
     raise KeyError("No recognized loss key found in test results")
 
 
-def main(model1_name, model2_name, split1, split2, log_dir, data_dir, num_epochs):
-    results = {
-        "init": {},
-        "after_regression": {},
-        "before_training": {},
-        "after_training": {},
-        "losses": {},
-    }
+def train_stitching_layer_and_model2_part2(
+    stitching_model, datamodule, trainer, num_epochs
+):
+    # Freeze model1 parameters
+    for param in stitching_model.part1_model1.parameters():
+        param.requires_grad = False
+
+    # Create a module for the stitching model
+    stitching_module = StitchingModelModule(stitching_model, learning_rate=1e-3)
+
+    # Train only the stitching layer and the second part of model2
+    trainer.fit(stitching_module, datamodule=datamodule)
+
+
+def save_results(results, log_dir, stage):
+    torch.save(results, log_dir / f"results_{stage}.pth")
+
+
+def load_results(log_dir, stage):
+    results_path = log_dir / f"results_{stage}.pth"
+    if results_path.exists():
+        return torch.load(results_path)
+    return None
+
+
+def main(
+    model1_name,
+    model2_name,
+    split1,
+    split2,
+    log_dir,
+    data_dir,
+    num_epochs,
+    enable_learning,
+):
+    log_dir = Path(log_dir) / "checkpoints"
+    # log_dir.mkdir(exist_ok=True, parents=True)
+
+    results = load_results(log_dir, "init") or {}
 
     model1 = load_model(model1_name, log_dir)
     model2 = load_model(model2_name, log_dir)
     stitching_model = StitchingModel(model1, model2, split1, split2)
-
-    log_dir = Path(log_dir) / "checkpoints"
-    # log_dir.mkdir(exist_ok=True, parents=True)
 
     cifar10_data = CIFAR10Data(
         data_dir=data_dir, batch_size=32, num_workers=4, pin_memory=True
@@ -71,38 +101,76 @@ def main(model1_name, model2_name, split1, split2, log_dir, data_dir, num_epochs
     cifar10_data.prepare_data()
     cifar10_data.setup(stage="fit")
 
-    save_model_states(results, "init", model1_name, model1, model2_name, model2, stitching_model)
+    if not results["init"]:
+        results["init"] = save_model_states(
+            model1_name, model1, model2_name, model2, stitching_model
+        )
+        save_results(results, log_dir, "init")
 
     do_linear_regression(stitching_model, cifar10_data)
 
-    save_model_states(results, "after_regression", model1_name, model1, model2_name, model2, stitching_model)
+    if not results["after_regression"]:
+        results["after_regression"] = save_model_states(
+            model1_name, model1, model2_name, model2, stitching_model
+        )
+        save_results(results, log_dir, "after_regression")
 
     logger = TensorBoardLogger(save_dir=log_dir, name="stitching_model")
+    lr_monitor = LearningRateMonitor(logging_interval="epoch")
+    early_stopping = EarlyStopping(
+        monitor="val_loss", patience=10, verbose=True, mode="min"
+    )
 
     trainer = pl.Trainer(
         max_epochs=num_epochs,
         logger=logger,
+        devices=1,
         strategy=(
             DDPStrategy(find_unused_parameters=True)
             if torch.cuda.device_count() > 1
             else None
         ),
+        callbacks=[lr_monitor, early_stopping],
     )
 
-    stitching_module = StitchingModelModule(stitching_model, learning_rate=1e-3)
+    if not results["before_training"]:
+        results["before_training"] = save_model_states(
+            model1_name, model1, model2_name, model2, stitching_model
+        )
+        save_results(results, log_dir, "before_training")
 
-    save_model_states(results, "before_training", model1_name, model1, model2_name, model2, stitching_model)
+    trainer.fit(stitching_model, datamodule=cifar10_data)
 
-    trainer.fit(stitching_module, datamodule=cifar10_data)
+    if not results["after_training"]:
+        results["after_training"] = save_model_states(
+            model1_name, model1, model2_name, model2, stitching_model
+        )
+        save_results(results, log_dir, "after_training")
 
-    save_model_states(results, "after_training", model1_name, model1, model2_name, model2, stitching_model)
+    if enable_learning:
+        # Train the stitching layer and the second part of model2
+        train_stitching_layer_and_model2_part2(
+            stitching_model, cifar10_data, trainer, num_epochs
+        )
 
-    # Test models and capture losses
-    results["losses"][f"{model1_name}_loss"] = test_model(model1, cifar10_data, trainer)
-    results["losses"][f"{model2_name}_loss"] = test_model(model2, cifar10_data, trainer)
-    results["losses"]["stitching_model_loss"] = test_model(
-        stitching_model, cifar10_data, trainer
-    )
+        if not results["after_training_model2_part2_stitching"]:
+            results["after_training_model2_part2_stitching"] = save_model_states(
+                model1_name, model1, model2_name, model2, stitching_model
+            )
+            save_results(results, log_dir, "after_training_model2_part2_stitching")
+
+    if not results["losses"]:
+        # Test models and capture losses
+        results["losses"][f"{model1_name}_loss"] = test_model(
+            model1, cifar10_data, trainer
+        )
+        results["losses"][f"{model2_name}_loss"] = test_model(
+            model2, cifar10_data, trainer
+        )
+        results["losses"]["stitching_model_loss"] = test_model(
+            stitching_model, cifar10_data, trainer
+        )
+        save_results(results, log_dir, "losses")
 
     # Log model architecture
     batch = next(iter(cifar10_data.train_dataloader()))[0].to(
@@ -156,6 +224,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num_epochs", type=int, default=10, help="Number of epochs to train the model"
     )
+    parser.add_argument(
+        "--enable_learning",
+        type=bool,
+        default=False,
+        help="Enable learning of the stitching layer and model 2 part 2",
+    )
     args = parser.parse_args()
 
     main(
@@ -166,4 +240,5 @@ if __name__ == "__main__":
         args.log_dir,
         args.data_dir,
         args.num_epochs,
+        args.enable_learning,
     )
