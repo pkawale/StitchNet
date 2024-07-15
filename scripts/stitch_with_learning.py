@@ -12,7 +12,9 @@ from helper_scripts.CIFAR10Data import CIFAR10Data
 from helper_scripts.utils import find_checkpoint_for_model
 
 
-def save_model_states(results, stage, model1_name, model1, model2_name,  model2, stitching_model):
+def save_model_states(
+    results, stage, model1_name, model1, model2_name, model2, stitching_model
+):
     results[stage] = {
         f"{model1_name}_state_dict": model1.state_dict(),
         f"{model2_name}_state_dict": model2.state_dict(),
@@ -49,6 +51,20 @@ def test_model(model, datamodule, trainer):
     raise KeyError("No recognized loss key found in test results")
 
 
+def train_stitching_layer_and_model2_part2(
+    stitching_model, datamodule, trainer, num_epochs
+):
+    # Freeze model1 parameters
+    for param in stitching_model.part1_model1.parameters():
+        param.requires_grad = False
+
+    # Create a module for the stitching model
+    stitching_module = StitchingModelModule(stitching_model, learning_rate=1e-3)
+
+    # Train only the stitching layer and the second part of model2
+    trainer.fit(stitching_module, datamodule=datamodule)
+
+
 def main(model1_name, model2_name, split1, split2, log_dir, data_dir, num_epochs):
     results = {
         "init": {},
@@ -71,11 +87,21 @@ def main(model1_name, model2_name, split1, split2, log_dir, data_dir, num_epochs
     cifar10_data.prepare_data()
     cifar10_data.setup(stage="fit")
 
-    save_model_states(results, "init", model1_name, model1, model2_name, model2, stitching_model)
+    save_model_states(
+        results, "init", model1_name, model1, model2_name, model2, stitching_model
+    )
 
     do_linear_regression(stitching_model, cifar10_data)
 
-    save_model_states(results, "after_regression", model1_name, model1, model2_name, model2, stitching_model)
+    save_model_states(
+        results,
+        "after_regression",
+        model1_name,
+        model1,
+        model2_name,
+        model2,
+        stitching_model,
+    )
 
     logger = TensorBoardLogger(save_dir=log_dir, name="stitching_model")
 
@@ -89,13 +115,44 @@ def main(model1_name, model2_name, split1, split2, log_dir, data_dir, num_epochs
         ),
     )
 
+    save_model_states(
+        results,
+        "before_training",
+        model1_name,
+        model1,
+        model2_name,
+        model2,
+        stitching_model,
+    )
+
+    # Full training of the stitching model
     stitching_module = StitchingModelModule(stitching_model, learning_rate=1e-3)
-
-    save_model_states(results, "before_training", model1_name, model1, model2_name, model2, stitching_model)
-
     trainer.fit(stitching_module, datamodule=cifar10_data)
 
-    save_model_states(results, "after_training", model1_name, model1, model2_name, model2, stitching_model)
+    save_model_states(
+        results,
+        "after_training",
+        model1_name,
+        model1,
+        model2_name,
+        model2,
+        stitching_model,
+    )
+
+    # Train the stitching layer and the second part of model2
+    train_stitching_layer_and_model2_part2(
+        stitching_model, cifar10_data, trainer, num_epochs
+    )
+
+    save_model_states(
+        results,
+        "after_training_model2_part2_stitching",
+        model1_name,
+        model1,
+        model2_name,
+        model2,
+        stitching_model,
+    )
 
     # Test models and capture losses
     results["losses"][f"{model1_name}_loss"] = test_model(model1, cifar10_data, trainer)

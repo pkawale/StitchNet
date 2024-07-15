@@ -6,6 +6,8 @@ from torchmetrics import Accuracy
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchvision import transforms, datasets
 
+from helper_scripts.utils import load_dataset
+
 
 class CIFAR10Module(pl.LightningModule):
     def __init__(self, model_name, learning_rate, weight_decay):
@@ -56,45 +58,6 @@ class CIFAR10Module(pl.LightningModule):
             "lr_scheduler": scheduler,
             "monitor": "val_loss",
         }
-
-    def train_dataloader(self):
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]
-        )
-        dataset = datasets.CIFAR10(
-            root="./data", train=True, download=True, transform=transform
-        )
-        train_loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
-        return train_loader
-
-    def val_dataloader(self):
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]
-        )
-        dataset = datasets.CIFAR10(
-            root="./data", train=False, download=True, transform=transform
-        )
-        val_loader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=4)
-        return val_loader
-
-    def test_dataloader(self):
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]
-        )
-        dataset = datasets.CIFAR10(
-            root="./data", train=False, download=True, transform=transform
-        )
-        test_loader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=4)
-        return test_loader
 
     def children(self, *args, **kwargs):
         return self.model.children(*args, **kwargs)

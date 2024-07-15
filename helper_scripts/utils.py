@@ -2,12 +2,9 @@ import os
 from glob import glob
 from pathlib import Path
 
-import certifi
 import logging
-import torch
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 
 
@@ -37,7 +34,7 @@ def setup_logging(model1, model2):
     return training_logger, testing_logger, comparison_logger
 
 
-def load_dataset(batch_size=64, num_workers=4, pin_memory=True):
+def load_dataset(batch_size=64, num_workers=4, pin_memory=True, train=True):
     transform = transforms.Compose(
         [
             transforms.Resize((32, 32)),  # CIFAR-10 image size
@@ -45,34 +42,20 @@ def load_dataset(batch_size=64, num_workers=4, pin_memory=True):
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )
-    cifar10_train = datasets.CIFAR10(
+    dataset = datasets.CIFAR10(
         root=os.path.join(os.getenv("DATA_DIR", "../data"), "cifar10"),
-        train=True,
+        train=train,
         download=True,
         transform=transform,
     )
-    cifar10_test = datasets.CIFAR10(
-        root=os.path.join(os.getenv("DATA_DIR", "../data"), "cifar10"),
-        train=False,
-        download=True,
-        transform=transform,
-    )
-
-    train_loader = DataLoader(
-        cifar10_train,
+    loader = DataLoader(
+        dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=train,
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
-    test_loader = DataLoader(
-        cifar10_test,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-    )
-    return train_loader, test_loader
+    return loader
 
 
 def find_checkpoint_for_model(log_dir: Path, model_name: str) -> Path:
