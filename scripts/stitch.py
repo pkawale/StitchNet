@@ -12,7 +12,7 @@ from helper_scripts.CIFAR10Data import CIFAR10Data
 from helper_scripts.utils import find_checkpoint_for_model
 
 
-def save_model_states(results, stage, model1_name , model1, model2_name,  model2, stitching_model):
+def save_model_states(results, stage, model1_name, model1, model2_name,  model2, stitching_model):
     results[stage] = {
         f"{model1_name}_state_dict": model1.state_dict(),
         f"{model2_name}_state_dict": model2.state_dict(),

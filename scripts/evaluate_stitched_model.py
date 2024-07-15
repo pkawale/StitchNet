@@ -3,9 +3,6 @@ from pathlib import Path
 import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
-from torch.utils.data import DataLoader
-from torchvision import transforms
-from torchvision.datasets import CIFAR10
 
 from helper_scripts.CIFAR10Module import CIFAR10Module
 from stitching_layer import StitchingModel
