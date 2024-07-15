@@ -49,4 +49,5 @@ def split_model(model: nn.Module, split_idx: int):
 
 __all__ = [
     "split_model",
+    "get_splittable_range",
 ]

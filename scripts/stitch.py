@@ -86,14 +86,14 @@ def main(
     num_epochs,
     enable_learning,
 ):
-    log_dir = Path(log_dir) / "checkpoints"
     # log_dir.mkdir(exist_ok=True, parents=True)
 
     results = load_results(log_dir, "init") or {}
 
     model1 = load_model(model1_name, log_dir)
     model2 = load_model(model2_name, log_dir)
-    stitching_model = StitchingModel(model1, model2, split1, split2)
+    stitching_model = StitchingModel(model1.model, model2.model, split1, split2)
+    log_dir = Path(log_dir) / "checkpoints"
 
     cifar10_data = CIFAR10Data(
         data_dir=data_dir, batch_size=32, num_workers=4, pin_memory=True
