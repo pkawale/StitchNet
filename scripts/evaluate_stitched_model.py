@@ -104,7 +104,7 @@ def visualize_results(results,model_name, comparison_type="model1_vs_stitched"):
     plt.show()
 
 
-def main(model1_name, model2_name, split1, split2, log_dir):
+def main(model1_name, model2_name, split1, split2, log_dir, data_dir):
     results = {"losses": {}, "accuracies": {}, "batch_losses": {}}
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -116,7 +116,7 @@ def main(model1_name, model2_name, split1, split2, log_dir):
     )
 
     cifar10_data = CIFAR10Data(
-        data_dir="./data", batch_size=32, num_workers=4, pin_memory=True
+        data_dir=data_dir, batch_size=32, num_workers=4, pin_memory=True
     )
     cifar10_data.prepare_data()
     cifar10_data.setup(stage="test")
@@ -179,6 +179,13 @@ if __name__ == "__main__":
         required=True,
         help="Directory to load logs and checkpoints",
     )
+
+    parser.add_argument(
+        "--data_dir",
+        type=Path,
+        required=True,
+        help="Directory to load data",
+    )
     args = parser.parse_args()
 
     main(
@@ -187,4 +194,5 @@ if __name__ == "__main__":
         args.index1,
         args.index2,
         args.log_dir,
+        args.data_dir
     )
