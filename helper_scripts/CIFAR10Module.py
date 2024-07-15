@@ -59,27 +59,5 @@ class CIFAR10Module(pl.LightningModule):
             "monitor": "val_loss",
         }
 
-    def create_dataloader(self, train = True):
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize((0.5,0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]
-        )
-        dataset = datasets.CIFAR10(
-            root="./data", train=train, download=True, transform=transform
-        )
-        loader = DataLoader(dataset, batch_size=32, shuffle=train, num_workers=4)
-        return loader
-
-    def train_dataloader(self):
-        return load_dataset(batch_size=32, num_workers=4, pin_memory=True, train=True)
-
-    def val_dataloader(self):
-        return load_dataset(batch_size=32, num_workers=4, pin_memory=True, train=False)
-
-    def test_dataloader(self):
-        return load_dataset(batch_size=32, num_workers=4, pin_memory=True, train=False)
-
     def children(self, *args, **kwargs):
         return self.model.children(*args, **kwargs)

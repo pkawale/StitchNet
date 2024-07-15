@@ -61,7 +61,7 @@ class StitchingLayer(nn.Module):
             )
 
         # Move tensors to CPU
-        final_device = input_tensor.device
+        final_device = self.conv.weight.device  # Use the device of the model weights
         input_tensor = input_tensor.cpu()
         output_tensor = output_tensor.cpu()
 
@@ -80,7 +80,6 @@ class StitchingLayer(nn.Module):
         self.conv.bias.data = torch.tensor(reg.intercept_, dtype=torch.float32).to(
             final_device
         )
-
 
 class StitchingModel(nn.Module):
     def __init__(self, model1, model2, split1, split2):
@@ -150,6 +149,7 @@ class StitchingModel(nn.Module):
             yield from self.stitching_layer.parameters()
 
     def initialize_stitching_layer(self, sample_input):
+        sample_input = sample_input.to(next(self.parameters()).device)
         with torch.no_grad():
             part1_output = self.part1_model1(sample_input)
             if part1_output.dim() < 4:

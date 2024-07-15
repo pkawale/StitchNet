@@ -1,17 +1,19 @@
 black
 certifi
-matplotlib
+matplotlib~=3.9.1
 numpy<2.0.0
 pandas
 psutil
 python-dotenv
-scikit-learn
+scikit-learn~=1.5.1
 seaborn
-timm
-torchvision
-torch
-tqdm
-torchviz
+timm~=1.0.7
+torchvision~=0.18.1
+torch~=2.3.1
+tqdm~=4.66.4
+torchviz~=0.0.2
 keras
-lightning[pytorch-extra]
+lightning[pytorch-extra]~=2.3.3
+tensorboard
 # TODO - fix conflicts
+torchmetrics~=1.4.0.post0

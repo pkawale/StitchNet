@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 
-class StitchingModelTrainer(pl.LightningModule):
+class StitchingModelModule(pl.LightningModule):
     def __init__(self, stitching_model, learning_rate=1e-3):
         super().__init__()
         self.stitching_model = stitching_model
