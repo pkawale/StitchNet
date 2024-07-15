@@ -4,6 +4,8 @@ from sklearn.linear_model import LinearRegression
 
 
 class StitchingModel(nn.Module):
+    # QUESTION: would it make sense to have StitchingModel inherit from LightningModule, rather than
+    # creating a separate StitchingModelModule wrapper class?
     def __init__(self, model1, model2, split1, split2):
         super(StitchingModel, self).__init__()
 

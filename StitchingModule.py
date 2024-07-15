@@ -3,6 +3,8 @@ import pytorch_lightning as pl
 from stitching_layer import StitchingModel
 
 class LightningStitchingModule(pl.LightningModule):
+    # QUESTION: is this class used anywhere? I see stitching_layer.StitchingModel and StitchingModelModule.StitchingModelModule being used
+    # (which are already redundant, perhaps), but this one is not used?
     def __init__(self, model1, model2, split1, split2):
         super(LightningStitchingModule, self).__init__()
         self.stitching_model = StitchingModel(model1, model2, split1, split2)

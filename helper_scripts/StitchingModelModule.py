@@ -4,6 +4,7 @@ from torch import nn
 
 
 class StitchingModelModule(pl.LightningModule):
+    # QUESTION: would it make sense to have
     def __init__(self, stitching_model, learning_rate=1e-3):
         super().__init__()
         self.stitching_model = stitching_model

@@ -15,6 +15,7 @@ from helper_scripts.utils import find_checkpoint_for_model
 def save_model_states(
     results, stage, model1_name, model1, model2_name, model2, stitching_model
 ):
+    # BEST-PRACTICES ISSUE: Redundant. Import from stitch.py, or refactor elsewhere?
     results[stage] = {
         f"{model1_name}_state_dict": model1.state_dict(),
         f"{model2_name}_state_dict": model2.state_dict(),
@@ -23,6 +24,7 @@ def save_model_states(
 
 
 def load_model(model_name, log_dir):
+    # BEST-PRACTICES ISSUE: Redundant. Import from stitch.py, or refactor elsewhere?
     checkpoint_path = find_checkpoint_for_model(log_dir, model_name)
     print(f"[INFO]: loading {model_name} from", checkpoint_path)
     model = CIFAR10Module.load_from_checkpoint(checkpoint_path)
@@ -30,6 +32,7 @@ def load_model(model_name, log_dir):
 
 
 def do_linear_regression(stitching_model, datamodule):
+    # BEST-PRACTICES ISSUE: Redundant. Import from stitch.py, or refactor elsewhere?
     train_loader = datamodule.train_dataloader()
     batch_im, _ = next(iter(train_loader))
     batch_im = batch_im.to(
@@ -39,6 +42,7 @@ def do_linear_regression(stitching_model, datamodule):
 
 
 def test_model(model, datamodule, trainer):
+    # BEST-PRACTICES ISSUE: Redundant. Import from stitch.py, or refactor elsewhere?
     test_module = StitchingModelModule(model, learning_rate=1e-3)
     test_results = trainer.test(test_module, datamodule=datamodule, verbose=False)
     print(f"Test results for {model.__class__.__name__}: {test_results}")
@@ -52,14 +56,43 @@ def test_model(model, datamodule, trainer):
 
 
 def train_stitching_layer_and_model2_part2(
-    stitching_model, datamodule, trainer, num_epochs
+    stitching_model, datamodule, trainer, num_epochs  # num_epochs unused?
 ):
     # Freeze model1 parameters
     for param in stitching_model.part1_model1.parameters():
         param.requires_grad = False
 
+    # BUG: StitchingModelModule.configure_optimizers() only optimizes the stitching layer params. I
+    #  suspect that model2_part2 is not actually being optimized!
+    #  Essentially, what we're doing throughout these stitching scripts is picking various parts
+    #  of the models and freezing them or training them. In stitch.py, we "freeze" model1 and model2
+    #  and train only the stitching layer. Here, we "freeze" model1 and train both S and M2P2.
+    #  *There are two ways to do this*. One is to tell the optimizer to only change certain parameters.
+    #  That is what I had suggested and what you're doing in StitchingModelModule.configure_optimizers().
+    #  The second way to do it is what you're doing here: overriding the requires_grad attribute
+    #  of the parameters you want to freeze. I suggest we pick only *one* of these two methods
+    #  to avoid confusion. Your method is arguably better because it reduces overhead of keeping
+    #  track of grads that will not be used. In any case, I also recommend moving the freezing logic
+    #  to StitchingModelModule. A context manager would make this very clean:
+    #
+    #    next(stitching_model.part1_model1.parameters()).requires_grad  # True
+    #    next(stitching_model.part2_model2.parameters()).requires_grad  # True
+    #    with stitching_model.freeze("part1_model1", "part1_model2"):
+    #        next(stitching_model.part1_model1.parameters()).requires_grad  # False
+    #        next(stitching_model.part2_model2.parameters()).requires_grad  # True
+    #    next(stitching_model.part1_model1.parameters()).requires_grad  # True
+    #    next(stitching_model.part2_model2.parameters()).requires_grad  # True
+    #
+    #  ...where freeze() is a function we would need to write.
+
     # Create a module for the stitching model
     stitching_module = StitchingModelModule(stitching_model, learning_rate=1e-3)
+
+    # TODO: need to add in the hyperparameter that controls how much model2 is allowed to
+    #  change. This will look like a regularization term added to the loss which penalizes how
+    #  far model2's parameters are allowed to move relative to where they started before this
+    #  training stage. Of course, we would then need a different results 'stage' for each value of
+    #  that hyperparameter.
 
     # Train only the stitching layer and the second part of model2
     trainer.fit(stitching_module, datamodule=datamodule)
@@ -138,6 +171,14 @@ def main(model1_name, model2_name, split1, split2, log_dir, data_dir, num_epochs
         model2,
         stitching_model,
     )
+
+    # NOTE: everything above here could be a call to stitch.main (which should probably be renamed/
+    #  refactored if it's going to be imported into other scripts).
+
+    # SUGGESTION: I think it would be cleaner to always reset the stitching model to the
+    # "after_regression" or "before_training" stage. That way, we always *jointly* train M2P2 along
+    # with training the stitching layer. I don't think this will impact the results by a lot, but it
+    # feels intuitively like it would simplify things a bit.
 
     # Train the stitching layer and the second part of model2
     train_stitching_layer_and_model2_part2(
