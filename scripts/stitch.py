@@ -13,31 +13,28 @@ from helper_scripts.utils import find_checkpoint_for_model
 
 
 def save_loss(
-    model1_name,
-    model2_name,
-    stitching_model,
-    cifar10_data,
-    trainer,
+        model1,
+        model2,
+        model1_name,
+        model2_name,
+        stitching_model,
+        cifar10_data,
+        trainer,
 ):
     return {
-        f"{model1_name}_loss": test_model(
-            stitching_model.model1, cifar10_data, trainer
-        ),
-        f"{model2_name}_loss": test_model(
-            stitching_model.model2, cifar10_data, trainer
-        ),
+        f"{model1_name}_loss": test_model(model1, cifar10_data, trainer),
+        f"{model2_name}_loss": test_model(model2, cifar10_data, trainer),
         "stitching_model_loss": test_model(stitching_model, cifar10_data, trainer),
     }
 
 
 def save_model_states(
-    model1_name, model2_name, stitching_model, cifar10_data, trainer
+        model1, model2, model1_name, model2_name, stitching_model, cifar10_data, trainer, stage
 ) -> dict:
     return {
         f"{model1_name}_state_dict": stitching_model.model1.state_dict(),
         f"{model2_name}_state_dict": stitching_model.model2.state_dict(),
-        "stitching_model_state_dict": stitching_model.stitching_layer.state_dict(),
-        "losses": save_loss(model1_name, model2_name, stitching_model, cifar10_data, trainer),
+        "stitching_model_state_dict": stitching_model.stitching_layer.state_dict()
     }
 
 
@@ -71,7 +68,7 @@ def test_model(model, datamodule, trainer):
 
 
 def train_stitching_layer_and_model2_part2(
-    stitching_model, datamodule, trainer, num_epochs
+        stitching_model, datamodule, trainer, num_epochs
 ):
     # Freeze model1 parameters
     for param in stitching_model.part1_model1.parameters():
@@ -97,19 +94,37 @@ def load_results(log_dir, stage, model1, model2, split1, split2):
     return None
 
 
-def main(
-    model1_name,
-    model2_name,
-    split1,
-    split2,
-    log_dir,
-    data_dir,
-    num_epochs,
-    enable_learning,
-):
+def initialize_trainer(logger, num_epochs):
+    lr_monitor = LearningRateMonitor(logging_interval="epoch")
+    early_stopping = EarlyStopping(
+        monitor="val_loss", patience=10, verbose=True, mode="min"
+    )
 
+    return pl.Trainer(
+        max_epochs=num_epochs,
+        logger=logger,
+        devices=1,
+        strategy=(
+            DDPStrategy(find_unused_parameters=True)
+            if torch.cuda.device_count() > 1
+            else None
+        ),
+        callbacks=[lr_monitor, early_stopping],
+    )
+
+
+def main(
+        model1_name,
+        model2_name,
+        split1,
+        split2,
+        log_dir,
+        data_dir,
+        num_epochs,
+        enable_learning,
+):
     # log_dir.mkdir(exist_ok=True, parents=True)
-    logger = TensorBoardLogger(save_dir=log_dir, name="stitching_model", version=0)
+    logger = TensorBoardLogger("lightning_logs")
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
     early_stopping = EarlyStopping(
         monitor="val_loss", patience=10, verbose=True, mode="min"
@@ -122,7 +137,7 @@ def main(
         strategy=(
             DDPStrategy(find_unused_parameters=True)
             if torch.cuda.device_count() > 1
-            else None
+            else "auto"
         ),
         callbacks=[lr_monitor, early_stopping],
     )
@@ -134,23 +149,26 @@ def main(
     cifar10_data.setup(stage="fit")
 
     results = (
-        load_results(log_dir, "init", model1_name, model2_name, split1, split2) or {}
+            load_results(log_dir, "init", model1_name, model2_name, split1, split2) or {}
     )
 
     model1 = load_model(model1_name, log_dir)
     model2 = load_model(model2_name, log_dir)
-    stitching_model = StitchingModel(model1, model2, split1, split2)
+    stitching_model = StitchingModel(model1.model, model2.model, split1, split2)
 
     log_dir = Path(log_dir) / "analysis"
     log_dir.mkdir(exist_ok=True)
 
     if "init" not in results:
         results["init"] = save_model_states(
+            model1,
+            model2,
             model1_name,
             model2_name,
             stitching_model,
             cifar10_data,
             trainer,
+            "init"
         )
         save_results(results, log_dir, "init", model1_name, model2_name, split1, split2)
 
@@ -158,7 +176,14 @@ def main(
 
     if "after_regression" not in results:
         results["after_regression"] = save_model_states(
-            model1_name, model2_name,  stitching_model, cifar10_data, trainer
+            model1,
+            model2,
+            model1_name,
+            model2_name,
+            stitching_model,
+            cifar10_data,
+            trainer,
+            "after_regression"
         )
         save_results(
             results,
@@ -172,7 +197,14 @@ def main(
 
     if "before_training" not in results:
         results["before_training"] = save_model_states(
-            model1_name, model2_name, stitching_model, cifar10_data, trainer
+            model1,
+            model2,
+            model1_name,
+            model2_name,
+            stitching_model,
+            cifar10_data,
+            trainer,
+            "before_training"
         )
         save_results(
             results,
@@ -188,7 +220,14 @@ def main(
 
     if "after_training" not in results:
         results["after_training"] = save_model_states(
-            model1_name, model2_name, stitching_model, cifar10_data, trainer
+            model1,
+            model2,
+            model1_name,
+            model2_name,
+            stitching_model,
+            cifar10_data,
+            trainer,
+            "after_training"
         )
         save_results(results, log_dir, "after_training", model1, model2, split1, split2)
 
@@ -200,7 +239,14 @@ def main(
 
         if not results["after_training_model2_part2_stitching"]:
             results["after_training_model2_part2_stitching"] = save_model_states(
-                model1_name, model2_name, stitching_model, cifar10_data, trainer
+                model1,
+                model2,
+                model1_name,
+                model2_name,
+                stitching_model,
+                cifar10_data,
+                trainer,
+                "after_training_model2_part2_stitching"
             )
             save_results(
                 results,
@@ -215,6 +261,8 @@ def main(
     if "losses" not in results:
         # Test models and capture losses
         results["losses"] = save_loss(
+            model1,
+            model2,
             model1_name,
             model2_name,
             stitching_model,

@@ -2,22 +2,23 @@ import torch
 from torch import nn
 from sklearn.linear_model import LinearRegression
 from lightning.pytorch import LightningModule
+from torch.utils._contextlib import F
 
 from helper_scripts.timm_surgery import split_model
 
 
 class StitchingModel(LightningModule):
-    def __init__(self, model1, model2, split1, split2, learning_rate=1e-3):
+    def __init__(self, model1, model2 = None, split1 = None, split2 = None, learning_rate=1e-3):
         super(StitchingModel, self).__init__()
 
-        # Split the models into two parts
+        # split the models into two parts basedon index
         self.part1_model1, self.part2_model1 = split_model(model1, split1)
-        self.part2_model1, self.part2_model2 = split_model(model2, split2)
+        self.part1_model2, self.part2_model2 = split_model(model2, split2)
 
-        # Sanity-check the model parts equal the model whole after splitting
+        # # Sanity-check the model parts equal the model whole after splitting
         dummy_data = torch.randn(4, 3, 32, 32).to(next(self.part1_model1.parameters()).device)
         assert torch.all(model1(dummy_data) == self.model1(dummy_data))
-        dummy_data = torch.randn(4,3, 32, 32).to(next(self.part1_model2.parameters()).device)
+        dummy_data = torch.randn(4, 3, 32, 32).to(next(self.part1_model2.parameters()).device)
         assert torch.all(model2(dummy_data) == self.model2(dummy_data))
 
 
@@ -100,17 +101,23 @@ class StitchingModel(LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        images, labels = batch
-        outputs = self(images)
-        loss = self.criterion(outputs, labels)
-        self.log(
-            "test_loss", loss,
-        )
+        x, y = batch
+        x, y = x.to(self.device), y.to(self.device)
+        y_hat = self(x)
+        loss = F.cross_entropy(y_hat, y)
+        self.log('test_loss', loss, prog_bar=True)
         return loss
+        # images, labels = batch
+        # outputs = self(images)
+        # loss = self.criterion(outputs, labels)
+        # self.log(
+        #     "test_loss", loss,
+        # )
+        # return loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(
-            self.stitching_model.stitching_layer.parameters(), lr=self.learning_rate
+            self.stitching_layer.parameters(), lr=self.learning_rate
         )
 
     def parameter_part1(self):

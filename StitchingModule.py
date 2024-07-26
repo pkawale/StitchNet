@@ -1,5 +1,5 @@
 from torch import nn, optim
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 from helper_scripts.stitching_layer import StitchingModel
 
 class LightningStitchingModule(pl.LightningModule):

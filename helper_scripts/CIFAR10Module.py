@@ -1,9 +1,11 @@
 from torch import nn, optim
 import lightning.pytorch as pl
 import timm
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchmetrics import Accuracy
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torchmetrics.classification import MulticlassAccuracy
 from torchvision import transforms, datasets
 
 from helper_scripts.utils import load_dataset
@@ -17,7 +19,7 @@ class CIFAR10Module(pl.LightningModule):
         self.criterion = nn.CrossEntropyLoss()
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
-        self.acc = Accuracy("multiclass", num_classes=10)
+        self.acc = MulticlassAccuracy(num_classes=10).to(self.device)
 
     def forward(self, x):
         return self.model(x)
@@ -39,11 +41,15 @@ class CIFAR10Module(pl.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        images, labels = batch
-        outputs = self(images)
-        loss = self.criterion(outputs, labels)
-        self.log("test_loss", loss)
-        self.log("test_acc", self.acc(outputs, labels))
+        x, y = batch
+        x, y = x.to(self.device), y.to(self.device)
+        y_hat = self(x)  # Ensure y_hat is defined as the model's output
+        loss = F.cross_entropy(y_hat, y)
+        self.log("test_loss", loss, prog_bar=True)
+
+        # Move metric calculation to the correct device
+        self.acc = self.acc.to(self.device)
+        self.log("test_acc", self.acc(y_hat, y), prog_bar=True)
         return loss
 
     def configure_optimizers(self):
