@@ -29,19 +29,14 @@ def save_loss(
 
 
 def save_model_states(
-    model1,
-    model2,
-    model1_name,
-    model2_name,
     stitching_model,
     cifar10_data,
     trainer,
     stage,
 ) -> dict:
     return {
-        f"{model1_name}_state_dict": stitching_model.model1.state_dict(),
-        f"{model2_name}_state_dict": stitching_model.model2.state_dict(),
-        "stitching_model_state_dict": stitching_model.stitching_layer.state_dict(),
+        "state_dict": stitching_model.state_dict(),  # TODO - this should work, if not send error to Prof
+        "loss": save_loss(...) # TODO
     }
 
 
@@ -81,13 +76,8 @@ def train_stitching_layer_and_model2_part2(
     for param in stitching_model.part1_model1.parameters():
         param.requires_grad = False
 
-    # Create a module for the stitching model
-    stitching_module = StitchingModel(
-        stitching_model, learning_rate=1e-3, enable_learning=True
-    )
-
     # Train only the stitching layer and the second part of model2
-    trainer.fit(stitching_module, datamodule=datamodule)
+    trainer.fit(stitching_model, datamodule=datamodule)
 
 
 def save_results(results, log_dir, stage, model1, model2, split1, split2):
@@ -130,7 +120,8 @@ def main(
     log_dir,
     data_dir,
     num_epochs,
-    enable_learning,
+    enable_learning: bool,
+    lambdas_model2: list[float],
 ):
     # log_dir.mkdir(exist_ok=True, parents=True)
     logger = TensorBoardLogger("lightning_logs")
@@ -248,31 +239,35 @@ def main(
         save_results(results, log_dir, "after_training", model1, model2, split1, split2)
 
     if enable_learning:
-        # Train the stitching layer and the second part of model2
-        train_stitching_layer_and_model2_part2(
-            stitching_model, cifar10_data, trainer, num_epochs
-        )
+        for lam in lambdas_model2:
+            if not results[f"after_training_model2_part2_stitching_{lam:.3f}"]:
 
-        if not results["after_training_model2_part2_stitching"]:
-            results["after_training_model2_part2_stitching"] = save_model_states(
-                model1,
-                model2,
-                model1_name,
-                model2_name,
-                stitching_model,
-                cifar10_data,
-                trainer,
-                "after_training_model2_part2_stitching",
-            )
-            save_results(
-                results,
-                log_dir,
-                "after_training_model2_part2_stitching",
-                model1,
-                model2,
-                split1,
-                split2,
-            )
+                # Train the stitching layer and the second part of model2
+                stitching_model.load_state_dict(results["after_training"]["state_dict"])
+                train_stitching_layer_and_model2_part2(
+                    stitching_model, cifar10_data, trainer, num_epochs
+                )
+
+                results[f"after_training_model2_part2_stitching_{lam:.3f}"] = save_model_states(
+                    model1,
+                    model2,
+                    model1_name,
+                    model2_name,
+                    stitching_model,
+                    cifar10_data,
+                    trainer,
+                    f"after_training_model2_part2_stitching_{lam:.3f}",
+                )
+                results[f"after_training_model2_part2_stitching_{lam:.3f}"]["lambda"] = lam
+                save_results(
+                    results,
+                    log_dir,
+                    f"after_training_model2_part2_stitching_{lam:.3f}",
+                    model1,
+                    model2,
+                    split1,
+                    split2,
+                )
 
     if "losses" not in results:
         # Test models and capture losses

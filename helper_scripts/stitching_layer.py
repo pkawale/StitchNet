@@ -1,3 +1,5 @@
+from typing import Mapping, Any
+
 import torch
 from torch import nn
 from sklearn.linear_model import LinearRegression
@@ -16,12 +18,18 @@ class StitchingModel(LightningModule):
         split2=None,
         learning_rate=1e-3,
         enable_learning=False,
+        l2_lambda=0.01,
     ):
         super(StitchingModel, self).__init__()
 
         # split the models into two parts basedon index
         self.part1_model1, self.part2_model1 = split_model(model1, split1)
         self.part1_model2, self.part2_model2 = split_model(model2, split2)
+
+        self.l2_lambda = l2_lambda
+
+        self.original_parameters = None
+        self.store_model2_parameters()  # TODO - write this function
 
         # # Sanity-check the model parts equal the model whole after splitting
         dummy_data = torch.randn(4, 3, 32, 32).to(
@@ -57,6 +65,10 @@ class StitchingModel(LightningModule):
         self.learning_rate = learning_rate
         self.enable_learning = enable_learning
         self.criterion = nn.CrossEntropyLoss()
+
+    def load_state_dict(self, *args, **kwargs):
+        super().load_state_dict(*args, **kwargs)
+        self.store_model2_parameters()
 
     @property
     def model1(self):
@@ -129,11 +141,10 @@ class StitchingModel(LightningModule):
         return loss
 
     def regularization(self):
-        l2_lambda = 0.01
         l2_reg = torch.tensor(0.).to(self.device)
         for param in self.parameters():
-            l2_reg += torch.norm(param, p=2)
-        return l2_lambda * l2_reg
+            l2_reg += torch.sum((param - original_param_value)**2)
+        return self.l2_lambda * l2_reg
     def configure_optimizers(self):
         return torch.optim.Adam(
             self.stitching_layer.parameters(), lr=self.learning_rate
