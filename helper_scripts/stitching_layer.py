@@ -8,7 +8,15 @@ from helper_scripts.timm_surgery import split_model
 
 
 class StitchingModel(LightningModule):
-    def __init__(self, model1, model2 = None, split1 = None, split2 = None, learning_rate=1e-3):
+    def __init__(
+        self,
+        model1,
+        model2=None,
+        split1=None,
+        split2=None,
+        learning_rate=1e-3,
+        enable_learning=False,
+    ):
         super(StitchingModel, self).__init__()
 
         # split the models into two parts basedon index
@@ -16,11 +24,14 @@ class StitchingModel(LightningModule):
         self.part1_model2, self.part2_model2 = split_model(model2, split2)
 
         # # Sanity-check the model parts equal the model whole after splitting
-        dummy_data = torch.randn(4, 3, 32, 32).to(next(self.part1_model1.parameters()).device)
+        dummy_data = torch.randn(4, 3, 32, 32).to(
+            next(self.part1_model1.parameters()).device
+        )
         assert torch.all(model1(dummy_data) == self.model1(dummy_data))
-        dummy_data = torch.randn(4, 3, 32, 32).to(next(self.part1_model2.parameters()).device)
+        dummy_data = torch.randn(4, 3, 32, 32).to(
+            next(self.part1_model2.parameters()).device
+        )
         assert torch.all(model2(dummy_data) == self.model2(dummy_data))
-
 
         if len(list(self.part1_model1.children())) == 0:
             raise ValueError(f"Model1 part1 is empty with split index {split1}")
@@ -44,6 +55,7 @@ class StitchingModel(LightningModule):
             shape_model2,
         )
         self.learning_rate = learning_rate
+        self.enable_learning = enable_learning
         self.criterion = nn.CrossEntropyLoss()
 
     @property
@@ -86,8 +98,11 @@ class StitchingModel(LightningModule):
         images, labels = batch
         outputs = self(images)
         loss = self.criterion(outputs, labels)
+        if self.enable_learning:
+            loss = loss + self.regularization()
         self.log(
-            "train_loss", loss,
+            "train_loss",
+            loss,
         )
         return loss
 
@@ -95,8 +110,11 @@ class StitchingModel(LightningModule):
         images, labels = batch
         outputs = self(images)
         loss = self.criterion(outputs, labels)
+        if self.enable_learning:
+            loss = loss + self.regularization_loss()
         self.log(
-            "val_loss", loss,
+            "val_loss",
+            loss,
         )
         return loss
 
@@ -105,16 +123,17 @@ class StitchingModel(LightningModule):
         x, y = x.to(self.device), y.to(self.device)
         y_hat = self(x)
         loss = F.cross_entropy(y_hat, y)
-        self.log('test_loss', loss, prog_bar=True)
+        if self.enable_learning:
+            loss = loss + self.regularization_loss()
+        self.log("test_loss", loss, prog_bar=True)
         return loss
-        # images, labels = batch
-        # outputs = self(images)
-        # loss = self.criterion(outputs, labels)
-        # self.log(
-        #     "test_loss", loss,
-        # )
-        # return loss
 
+    def regularization(self):
+        l2_lambda = 0.01
+        l2_reg = torch.tensor(0.).to(self.device)
+        for param in self.parameters():
+            l2_reg += torch.norm(param, p=2)
+        return l2_lambda * l2_reg
     def configure_optimizers(self):
         return torch.optim.Adam(
             self.stitching_layer.parameters(), lr=self.learning_rate

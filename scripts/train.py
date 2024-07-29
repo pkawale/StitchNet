@@ -24,6 +24,7 @@ def main(
     num_workers,
     seed: int = 24682479,
 ):
+    log_dir = Path(log_dir).expanduser().resolve()
     run_logs = Path(log_dir) / f"{model_name}_{datetime.now()}_logs"
     run_logs.mkdir(parents=True, exist_ok=True)
     # TODO - break early if model with same hyperparams exists

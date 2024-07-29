@@ -1,3 +1,4 @@
+import torchmetrics
 from torch import nn, optim
 import lightning.pytorch as pl
 import timm
@@ -19,7 +20,7 @@ class CIFAR10Module(pl.LightningModule):
         self.criterion = nn.CrossEntropyLoss()
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
-        self.acc = MulticlassAccuracy(num_classes=10).to(self.device)
+        self.acc = torchmetrics.Accuracy(task="multiclass", num_classes=10)
 
     def forward(self, x):
         return self.model(x)
@@ -33,11 +34,12 @@ class CIFAR10Module(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        images, labels = batch
-        outputs = self(images)
-        loss = self.criterion(outputs, labels)
+        x, y = batch
+        logits = self(x)
+        loss = self.criterion(logits, y)
         self.log("val_loss", loss, prog_bar=True)
-        self.log("val_acc", self.acc(outputs, labels))
+        self.acc = self.acc.to(logits.device)  # Ensure the metric is on the same device
+        self.log("val_acc", self.acc(logits, y), prog_bar=True)
         return loss
 
     def test_step(self, batch, batch_idx):
