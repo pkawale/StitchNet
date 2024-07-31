@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from sklearn.linear_model import LinearRegression
 from lightning.pytorch import LightningModule
-from torch.utils._contextlib import F
+import torch.nn.functional as F
 
 from helper_scripts.timm_surgery import split_model
 
@@ -16,12 +16,15 @@ class StitchingModel(LightningModule):
         split2=None,
         learning_rate=1e-3,
         enable_learning=False,
+        l2_lambda = 0.01,
     ):
         super(StitchingModel, self).__init__()
 
         # split the models into two parts basedon index
         self.part1_model1, self.part2_model1 = split_model(model1, split1)
         self.part1_model2, self.part2_model2 = split_model(model2, split2)
+
+        self.l2_lambda = l2_lambda
 
         # # Sanity-check the model parts equal the model whole after splitting
         dummy_data = torch.randn(4, 3, 32, 32).to(
@@ -54,9 +57,24 @@ class StitchingModel(LightningModule):
             shape_model1,
             shape_model2,
         )
+        # Debug: Check convolutional layer weights
+        # print(f"Conv layer weights after init: {self.stitching_layer.conv.weight.shape}")
         self.learning_rate = learning_rate
         self.enable_learning = enable_learning
         self.criterion = nn.CrossEntropyLoss()
+        # Save original parameters for regularization
+        self.original_param_values = {name: param.clone().detach()
+                                      for name, param in self.part2_model2.named_parameters()}
+
+    def load_state_dict(self, *args, **kwargs):
+        super().load_state_dict(*args, **kwargs)
+        self.store_model2_parameters()
+
+    def store_model2_parameters(self):
+        self.original_param_values = {
+            name: param.clone().detach()
+            for name, param in self.part2_model2.named_parameters()
+        }
 
     @property
     def model1(self):
@@ -111,7 +129,7 @@ class StitchingModel(LightningModule):
         outputs = self(images)
         loss = self.criterion(outputs, labels)
         if self.enable_learning:
-            loss = loss + self.regularization_loss()
+            loss = loss + self.regularization()
         self.log(
             "val_loss",
             loss,
@@ -124,16 +142,19 @@ class StitchingModel(LightningModule):
         y_hat = self(x)
         loss = F.cross_entropy(y_hat, y)
         if self.enable_learning:
-            loss = loss + self.regularization_loss()
+            loss = loss + self.regularization()
         self.log("test_loss", loss, prog_bar=True)
         return loss
 
     def regularization(self):
-        l2_lambda = 0.01
-        l2_reg = torch.tensor(0.).to(self.device)
-        for param in self.parameters():
-            l2_reg += torch.norm(param, p=2)
-        return l2_lambda * l2_reg
+        l2_reg = torch.tensor(0.0).to(self.device)
+        for name, param in self.part2_model2.named_parameters():
+            original_param_value = self.original_param_values[name]
+            # Move original_param_value to the same device as param
+            original_param_value = original_param_value.to(param.device)
+            l2_reg += torch.sum((param - original_param_value) ** 2)
+        return self.l2_lambda * l2_reg
+
     def configure_optimizers(self):
         return torch.optim.Adam(
             self.stitching_layer.parameters(), lr=self.learning_rate
@@ -153,35 +174,49 @@ class StitchingModel(LightningModule):
         sample_input = sample_input.to(next(self.parameters()).device)
         with torch.no_grad():
             part1_output = self.part1_model1(sample_input)
+            # print(f"part1_output shape: {part1_output.shape}")
             if part1_output.dim() < 4:
                 part1_output = part1_output.view(
                     part1_output.size(0), part1_output.size(1), 1, 1
                 )
             if part1_output.dim() < 4:
                 raise ValueError("part1_output has less than 4 dimensions.")
-            upscaled_output = nn.functional.interpolate(
-                part1_output,
-                size=(part1_output.size(2), part1_output.size(3)),
-                mode="bilinear",
-                align_corners=False,
-            )
+            part2_output = self.part1_model2(sample_input)
+            # upscaled_output = nn.functional.interpolate(
+            #     part1_output,
+            #     size=(part1_output.size(2), part1_output.size(3)),
+            #     mode="bilinear",
+            #     align_corners=False,
+            # )
             self.stitching_layer.initialize_weights_with_regression(
-                part1_output, upscaled_output
+                part1_output, part2_output
             )
+            # print(
+            #     f"Stitching layer initialized with shapes: input {part1_output.shape}, output {part2_output.shape}"
+            # )
 
 
 class StitchingLayer(nn.Module):
     def __init__(self, in_channels, out_channels, in_shape, out_shape):
         super(StitchingLayer, self).__init__()
+        # print("in channels", in_channels)
+        # print("out channels", out_channels)
+        # print("In shape", in_shape)
+        # print("Out shape", out_shape)
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
         # Store the target spatial dimensions
         self.target_size = out_shape[2:]
+        # Debug: Check convolutional layer weights
+        # print(f"Conv layer weights after init: {self.conv.weight.shape}")
 
     def forward(self, x):
         x = nn.functional.interpolate(
             x, size=self.target_size, mode="bilinear", align_corners=False
         )
+        # print(f"Shape after interpolation: {x.shape}")
+        # print(f"Applying conv layer with weights shape: {self.conv.weight.shape}")
         x = self.conv(x)
+        # print(f"Shape after conv: {x.shape}")
         return x
 
     def initialize_weights_with_regression(self, input_tensor, output_tensor):
@@ -213,6 +248,10 @@ class StitchingLayer(nn.Module):
         batch_size, input_dim, height, width = input_tensor.shape
         _, output_dim, out_height, out_width = output_tensor.shape
 
+        # print(
+        #     f"Resized input tensor shape: {input_tensor.shape}, resized output tensor shape: {output_tensor.shape}"
+        # )  # Debugging output shape
+
         # Upscale or downscale input_tensor to match output_tensor dimensions
         if height != out_height or width != out_width:
             input_tensor = nn.functional.interpolate(
@@ -221,6 +260,10 @@ class StitchingLayer(nn.Module):
                 mode="bilinear",
                 align_corners=False,
             )
+
+            # print(
+            #     f"Final input tensor shape for regression: {input_tensor.shape}, output tensor shape: {output_tensor.shape}"
+            # )  # Debugging output shape
 
         # Move tensors to CPU
         final_device = self.conv.weight.device  # Use the device of the model weights
@@ -242,3 +285,11 @@ class StitchingLayer(nn.Module):
         self.conv.bias.data = torch.tensor(reg.intercept_, dtype=torch.float32).to(
             final_device
         )
+
+
+if __name__ == "__main__":
+    x = torch.randn(32, 256, 2, 2)  # Assuming batch size 32, 256 channels from part1_model1
+    stitching_layer = StitchingLayer(in_channels=256, out_channels=128, in_shape=(32, 256, 2, 2),
+                                     out_shape=(32, 128, 4, 4))
+    output = stitching_layer(x)
+    print(f"Final output shape: {output.shape}")  # Should be (32, 128, 4, 4)
