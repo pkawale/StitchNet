@@ -1,10 +1,31 @@
 import torch
+import numpy as np
 from torch import nn
 from sklearn.linear_model import LinearRegression
 from lightning.pytorch import LightningModule
 import torch.nn.functional as F
-
+from typing import Self
+from itertools import chain
 from helper_scripts.timm_surgery import split_model
+
+
+def _get_num_channels(mdl, input_shape=(4, 3, 32, 32), device="cpu"):
+    if len(list(mdl.children())) == 0:
+        raise ValueError("One of the model parts is empty.")
+
+    with torch.no_grad():
+        # Forward pass through mdl to get the output shape
+        x = torch.randn(*input_shape).to(device)
+
+        for layer in mdl.children():
+            if isinstance(layer, nn.Module) and not isinstance(
+                layer, (nn.CrossEntropyLoss, nn.MSELoss, nn.L1Loss)
+            ):
+                x = layer(x)
+        num_output_channels = x.shape[1]
+        output_shape = x.shape
+
+    return num_output_channels, output_shape
 
 
 class StitchingModel(LightningModule):
@@ -16,24 +37,19 @@ class StitchingModel(LightningModule):
         split2=None,
         learning_rate=1e-3,
         enable_learning=False,
-        l2_lambda = 0.01,
+        l2_lambda=np.inf,
     ):
         super(StitchingModel, self).__init__()
 
-        # split the models into two parts basedon index
+        # split the models into two parts based on index
         self.part1_model1, self.part2_model1 = split_model(model1, split1)
         self.part1_model2, self.part2_model2 = split_model(model2, split2)
 
         self.l2_lambda = l2_lambda
 
         # # Sanity-check the model parts equal the model whole after splitting
-        dummy_data = torch.randn(4, 3, 32, 32).to(
-            next(self.part1_model1.parameters()).device
-        )
+        dummy_data = torch.randn(4, 3, 32, 32)
         assert torch.all(model1(dummy_data) == self.model1(dummy_data))
-        dummy_data = torch.randn(4, 3, 32, 32).to(
-            next(self.part1_model2.parameters()).device
-        )
         assert torch.all(model2(dummy_data) == self.model2(dummy_data))
 
         if len(list(self.part1_model1.children())) == 0:
@@ -43,10 +59,10 @@ class StitchingModel(LightningModule):
             raise ValueError(f"Model2 part2 is empty with split index {split2}")
 
         # Get number of channels and dimensions
-        self.num_channels_model1, shape_model1 = self._get_num_channels(
+        self.num_channels_model1, shape_model1 = _get_num_channels(
             self.part1_model1, (4, 3, 32, 32)
         )
-        self.num_channels_model2, shape_model2 = self._get_num_channels(
+        self.num_channels_model2, shape_model2 = _get_num_channels(
             self.part1_model2, (4, 3, 32, 32)
         )
 
@@ -62,12 +78,23 @@ class StitchingModel(LightningModule):
         self.learning_rate = learning_rate
         self.enable_learning = enable_learning
         self.criterion = nn.CrossEntropyLoss()
-        # Save original parameters for regularization
-        self.original_param_values = {name: param.clone().detach()
-                                      for name, param in self.part2_model2.named_parameters()}
 
-    def load_state_dict(self, *args, **kwargs):
-        super().load_state_dict(*args, **kwargs)
+        # Save original parameters for regularization
+        self.original_param_values = {}
+        self.store_model2_parameters()
+
+    def state_dict(self, *args, **kwargs):
+        state = super().state_dict(*args, **kwargs)
+        state["enable_learning"] = self.enable_learning
+        state["l2_lambda"] = self.l2_lambda
+        state["learning_rate"] = self.learning_rate
+        return state
+
+    def load_state_dict(self, dict, *args, **kwargs):
+        super().load_state_dict(dict, *args, **kwargs, strict=False)
+        self.enable_learning = dict["enable_learning"]
+        self.l2_lambda = dict["l2_lambda"]
+        self.learning_rate = dict["learning_rate"]
         self.store_model2_parameters()
 
     def store_model2_parameters(self):
@@ -78,29 +105,17 @@ class StitchingModel(LightningModule):
 
     @property
     def model1(self):
-        return nn.Sequential(self.part1_model1, self.part2_model1)
+        return LitSequential(self.part1_model1, self.part2_model1)
 
     @property
     def model2(self):
-        return nn.Sequential(self.part1_model2, self.part2_model2)
+        return LitSequential(self.part1_model2, self.part2_model2)
 
-    def _get_num_channels(self, mdl, input_shape=(4, 3, 32, 32)):
-        if len(list(mdl.children())) == 0:
-            raise ValueError("One of the model parts is empty.")
-
-        with torch.no_grad():
-            # Forward pass through mdl to get the output shape
-            x = torch.randn(*input_shape).to(next(mdl.parameters()).device)
-
-            for layer in mdl.children():
-                if isinstance(layer, nn.Module) and not isinstance(
-                    layer, (nn.CrossEntropyLoss, nn.MSELoss, nn.L1Loss)
-                ):
-                    x = layer(x)
-            num_output_channels = x.shape[1]
-            output_shape = x.shape
-
-        return num_output_channels, output_shape
+    def to(self, *args, **kwargs) -> Self:
+        super().to(*args, **kwargs)
+        for key, value in self.original_param_values.items():
+            self.original_param_values[key] = value.to(*args, **kwargs)
+        return self
 
     def forward(self, x):
         x = self.part1_model1(x)
@@ -112,39 +127,36 @@ class StitchingModel(LightningModule):
         x = self.part2_model2(x)
         return x
 
-    def training_step(self, batch, batch_idx):
-        images, labels = batch
-        outputs = self(images)
-        loss = self.criterion(outputs, labels)
+    def losses(self, batch, pre: str = ""):
+        x, y = batch
+        outputs = self(x)
+        loss_terms = {
+            f"{pre}cross_entropy": F.cross_entropy(outputs, y, reduction="mean"),
+            f"{pre}delta_weights": self.regularization(),
+        }
         if self.enable_learning:
-            loss = loss + self.regularization()
-        self.log(
-            "train_loss",
-            loss,
-        )
-        return loss
+            loss_terms[f"{pre}loss"] = (
+                loss_terms[f"{pre}cross_entropy"]
+                + loss_terms[f"{pre}delta_weights"] * self.l2_lambda
+            )
+        else:
+            loss_terms[f"{pre}loss"] = loss_terms[f"{pre}cross_entropy"]
+        return loss_terms
+
+    def training_step(self, batch, batch_idx):
+        terms = self.losses(batch, "train_")
+        self.log_dict(terms)
+        return terms["train_loss"]
 
     def validation_step(self, batch, batch_idx):
-        images, labels = batch
-        outputs = self(images)
-        loss = self.criterion(outputs, labels)
-        if self.enable_learning:
-            loss = loss + self.regularization()
-        self.log(
-            "val_loss",
-            loss,
-        )
-        return loss
+        terms = self.losses(batch, "val_")
+        self.log_dict(terms)
+        return terms["val_loss"]
 
     def test_step(self, batch, batch_idx):
-        x, y = batch
-        x, y = x.to(self.device), y.to(self.device)
-        y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y)
-        if self.enable_learning:
-            loss = loss + self.regularization()
-        self.log("test_loss", loss, prog_bar=True)
-        return loss
+        terms = self.losses(batch, "test_")
+        self.log_dict(terms)
+        return terms["test_loss"]
 
     def regularization(self):
         l2_reg = torch.tensor(0.0).to(self.device)
@@ -156,19 +168,17 @@ class StitchingModel(LightningModule):
         return self.l2_lambda * l2_reg
 
     def configure_optimizers(self):
-        return torch.optim.Adam(
-            self.stitching_layer.parameters(), lr=self.learning_rate
-        )
-
-    def parameter_part1(self):
-        yield from self.part1_model1.parameters()
-
-    def parameters_part2(self):
-        yield from self.part2_model2.parameters()
-
-    def parameters_stitching(self):
-        if isinstance(self.stitching_layer, StitchingLayer):
-            yield from self.stitching_layer.parameters()
+        if self.enable_learning:
+            return torch.optim.Adam(
+                chain(
+                    self.stitching_layer.parameters(), self.part2_model2.parameters()
+                ),
+                lr=self.learning_rate,
+            )
+        else:
+            return torch.optim.Adam(
+                self.stitching_layer.parameters(), lr=self.learning_rate
+            )
 
     def initialize_stitching_layer(self, sample_input):
         sample_input = sample_input.to(next(self.parameters()).device)
@@ -194,6 +204,33 @@ class StitchingModel(LightningModule):
             # print(
             #     f"Stitching layer initialized with shapes: input {part1_output.shape}, output {part2_output.shape}"
             # )
+
+
+class LitSequential(LightningModule):
+    def __init__(self, *models):
+        super(LitSequential, self).__init__()
+        self.model = nn.Sequential(*models)
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        raise RuntimeError(
+            "We don't expect to ever be trining the LitSequential wrapper module. "
+            "Something must have gone wrong."
+        )
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        stats = {"val_loss": F.cross_entropy(self(x), y)}
+        self.log_dict(stats)
+        return stats["val_loss"]
+
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        stats = {"test_loss": F.cross_entropy(self(x), y)}
+        self.log_dict(stats)
+        return stats["test_loss"]
 
 
 class StitchingLayer(nn.Module):
@@ -288,8 +325,14 @@ class StitchingLayer(nn.Module):
 
 
 if __name__ == "__main__":
-    x = torch.randn(32, 256, 2, 2)  # Assuming batch size 32, 256 channels from part1_model1
-    stitching_layer = StitchingLayer(in_channels=256, out_channels=128, in_shape=(32, 256, 2, 2),
-                                     out_shape=(32, 128, 4, 4))
+    x = torch.randn(
+        32, 256, 2, 2
+    )  # Assuming batch size 32, 256 channels from part1_model1
+    stitching_layer = StitchingLayer(
+        in_channels=256,
+        out_channels=128,
+        in_shape=(32, 256, 2, 2),
+        out_shape=(32, 128, 4, 4),
+    )
     output = stitching_layer(x)
     print(f"Final output shape: {output.shape}")  # Should be (32, 128, 4, 4)
