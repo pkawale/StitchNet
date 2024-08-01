@@ -137,7 +137,7 @@ def main(
     trainer = initialize_trainer(logger, num_epochs, devices=devices)
 
     cifar10_data = CIFAR10Data(
-        data_dir=data_dir, batch_size=32, num_workers=4, pin_memory=True
+        data_dir=data_dir, batch_size=128, num_workers=32, pin_memory=True
     )
     cifar10_data.prepare_data()
     cifar10_data.setup(stage="fit")
