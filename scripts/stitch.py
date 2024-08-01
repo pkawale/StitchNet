@@ -56,12 +56,19 @@ def train_stitching_layer_and_model2_part2(
     stitching_model, datamodule, trainer, num_epochs
 ):
     # Freeze model1 parameters
+    prev_model1_state = []
     for param in stitching_model.part1_model1.parameters():
+        prev_model1_state.append(param.requires_grad)
         param.requires_grad = False
 
     # Train only the stitching layer and the second part of model2
     trainer.fit(stitching_model, datamodule=datamodule, max_epochs=num_epochs)
 
+    # Un-freeze model1 parameters
+    for prev_state, param in zip(
+        prev_model1_state, stitching_model.part1_model1.parameters()
+    ):
+        param.requires_grad = prev_state
 
 
 def initialize_trainer(logger, num_epochs, devices="auto"):
