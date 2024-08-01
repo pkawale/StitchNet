@@ -82,8 +82,18 @@ class StitchingModel(LightningModule):
         self.original_param_values = {}
         self.store_model2_parameters()
 
-    def load_state_dict(self, *args, **kwargs):
-        super().load_state_dict(*args, **kwargs)
+    def state_dict(self, *args, **kwargs):
+        state = super().state_dict(*args, **kwargs)
+        state["enable_learning"] = self.enable_learning
+        state["l2_lambda"] = self.l2_lambda
+        state["learning_rate"] = self.learning_rate
+        return state
+
+    def load_state_dict(self, dict, *args, **kwargs):
+        super().load_state_dict(dict, *args, **kwargs, strict=False)
+        self.enable_learning = dict["enable_learning"]
+        self.l2_lambda = dict["l2_lambda"]
+        self.learning_rate = dict["learning_rate"]
         self.store_model2_parameters()
 
     def store_model2_parameters(self):
