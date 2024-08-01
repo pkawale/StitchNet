@@ -274,6 +274,11 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    try:
+        args.devices = [int(device) for device in args.devices.split(",")]
+    except ValueError:
+        assert args.devices == "auto", "Invalid device argument"
+
     if args.lambda_model2 is None:
         assert not args.enable_learning, "Lambda values required for learning"
 
