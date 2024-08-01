@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from torch import nn
 from sklearn.linear_model import LinearRegression
 from lightning.pytorch import LightningModule
@@ -36,7 +37,7 @@ class StitchingModel(LightningModule):
         split2=None,
         learning_rate=1e-3,
         enable_learning=False,
-        l2_lambda=0.01,
+        l2_lambda=np.inf,
     ):
         super(StitchingModel, self).__init__()
 
@@ -169,7 +170,9 @@ class StitchingModel(LightningModule):
     def configure_optimizers(self):
         if self.enable_learning:
             return torch.optim.Adam(
-               chain(self.stitching_layer.parameters(), self.part2_model2.parameters()),
+                chain(
+                    self.stitching_layer.parameters(), self.part2_model2.parameters()
+                ),
                 lr=self.learning_rate,
             )
         else:
@@ -212,10 +215,10 @@ class LitSequential(LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
-        stats = {"train_loss": F.cross_entropy(self(x), y)}
-        self.log_dict(stats)
-        return stats["train_loss"]
+        raise RuntimeError(
+            "We don't expect to ever be trining the LitSequential wrapper module. "
+            "Something must have gone wrong."
+        )
 
     def validation_step(self, batch, batch_idx):
         x, y = batch

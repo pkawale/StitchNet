@@ -75,11 +75,14 @@ def train_stitching_model_gradient_descent(
         for name, param in stitching_model.part2_model2.named_parameters():
             prev_model2_state[name] = param.requires_grad
             param.requires_grad = False
+        stitching_model.enable_learning = False
+        stitching_model.l2_lambda = np.inf
     else:
         # TODO - refactor to avoid awkward dependency here where caller needs to set flags *and*
         #  freeze/unfreeze the model
         stitching_model.enable_learning = True
         stitching_model.l2_lambda = lambda_model2
+        stitching_model.store_model2_parameters()
 
     # TODO - sanity-check that stitching_model.configure_optimizers() returns an optimizer that
     #  contains the parameters of the models that are supposed to be trained and no others.
@@ -147,7 +150,6 @@ def main(
         split1,
         split2,
         learning_rate=1e-3,
-        enable_learning=enable_learning,
     )
 
     analysis_dir = Path(log_dir) / "analysis"
