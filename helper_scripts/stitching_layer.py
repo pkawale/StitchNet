@@ -167,9 +167,15 @@ class StitchingModel(LightningModule):
         return self.l2_lambda * l2_reg
 
     def configure_optimizers(self):
-        return torch.optim.Adam(
-            self.stitching_layer.parameters(), lr=self.learning_rate
-        )
+        if self.enable_learning:
+            return torch.optim.Adam(
+               chain(self.stitching_layer.parameters(), self.part2_model2.parameters()),
+                lr=self.learning_rate,
+            )
+        else:
+            return torch.optim.Adam(
+                self.stitching_layer.parameters(), lr=self.learning_rate
+            )
 
     def initialize_stitching_layer(self, sample_input):
         sample_input = sample_input.to(next(self.parameters()).device)
