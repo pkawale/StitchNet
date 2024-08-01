@@ -104,11 +104,11 @@ class StitchingModel(LightningModule):
 
     @property
     def model1(self):
-        return nn.Sequential(self.part1_model1, self.part2_model1)
+        return LitSequential(self.part1_model1, self.part2_model1)
 
     @property
     def model2(self):
-        return nn.Sequential(self.part1_model2, self.part2_model2)
+        return LitSequential(self.part1_model2, self.part2_model2)
 
     def to(self, *args, **kwargs) -> Self:
         super().to(*args, **kwargs)
@@ -195,6 +195,33 @@ class StitchingModel(LightningModule):
             # print(
             #     f"Stitching layer initialized with shapes: input {part1_output.shape}, output {part2_output.shape}"
             # )
+
+
+class LitSequential(LightningModule):
+    def __init__(self, *models):
+        super(LitSequential, self).__init__()
+        self.model = nn.Sequential(*models)
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        stats = {"train_loss": F.cross_entropy(self(x), y)}
+        self.log_dict(stats)
+        return stats["train_loss"]
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        stats = {"val_loss": F.cross_entropy(self(x), y)}
+        self.log_dict(stats)
+        return stats["val_loss"]
+
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        stats = {"test_loss": F.cross_entropy(self(x), y)}
+        self.log_dict(stats)
+        return stats["test_loss"]
 
 
 class StitchingLayer(nn.Module):
