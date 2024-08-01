@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import lightning.pytorch as pl
 import torch
+import numpy as np
 from lightning.pytorch.callbacks import LearningRateMonitor, EarlyStopping
 from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -52,23 +53,49 @@ def test_model(model, datamodule, trainer):
     raise KeyError("No recognized loss key found in test results")
 
 
-def train_stitching_layer_and_model2_part2(
-    stitching_model, datamodule, trainer, num_epochs
+def train_stitching_model_gradient_descent(
+    stitching_model,
+    datamodule,
+    trainer,
+    freeze_model1=True,
+    freeze_model2=True,
+    lambda_model2=np.inf,
 ):
-    # Freeze model1 parameters
-    prev_model1_state = []
-    for param in stitching_model.part1_model1.parameters():
-        prev_model1_state.append(param.requires_grad)
-        param.requires_grad = False
+    # TODO - use a context manager to freeze and unfreeze the models
+    prev_model1_state = {}
+    if freeze_model1:
+        # Freeze model1 parameters
+        for name, param in stitching_model.part1_model1.named_parameters():
+            prev_model1_state[name] = param.requires_grad
+            param.requires_grad = False
 
-    # Train only the stitching layer and the second part of model2
-    trainer.fit(stitching_model, datamodule=datamodule, max_epochs=num_epochs)
+    prev_model2_state = {}
+    if freeze_model2:
+        # Freeze model2 parameters
+        for name, param in stitching_model.part2_model2.named_parameters():
+            prev_model2_state[name] = param.requires_grad
+            param.requires_grad = False
+    else:
+        # TODO - refactor to avoid awkward dependency here where caller needs to set flags *and*
+        #  freeze/unfreeze the model
+        stitching_model.enable_learning = True
+        stitching_model.l2_lambda = lambda_model2
 
-    # Un-freeze model1 parameters
-    for prev_state, param in zip(
-        prev_model1_state, stitching_model.part1_model1.parameters()
-    ):
-        param.requires_grad = prev_state
+    # TODO - sanity-check that stitching_model.configure_optimizers() returns an optimizer that
+    #  contains the parameters of the models that are supposed to be trained and no others.
+
+    # Train whatever can be trained
+    trainer.fit(stitching_model, datamodule=datamodule)
+
+    if freeze_model1:
+        # Unfreeze model1 parameters
+        for name, param in stitching_model.part1_model1.named_parameters():
+            param.requires_grad = prev_model1_state[name]
+
+    if freeze_model2:
+        # Unfreeze model2 parameters
+        for name, param in stitching_model.part2_model2.named_parameters():
+            param.requires_grad = prev_model2_state[name]
 
 
 def initialize_trainer(logger, num_epochs, devices="auto"):
@@ -147,7 +174,14 @@ def main(
 
     if "after_training" not in results:
         stitching_model.load_state_dict(results["after_regression"]["state_dict"])
-        trainer.fit(stitching_model, datamodule=cifar10_data)
+        train_stitching_model_gradient_descent(
+            stitching_model,
+            cifar10_data,
+            trainer,
+            freeze_model1=True,
+            freeze_model2=True,
+            lambda_model2=np.inf,
+        )
         results["after_training"] = snapshot(stitching_model, cifar10_data, trainer)
         torch.save(results, results_file)
 
@@ -156,10 +190,14 @@ def main(
             key = f"after_training_model2_part2_stitching_{lam:.3f}"
             if key not in results:
                 # Train the stitching layer and the second part of model2
-                stitching_model.load_state_dict(results["after_training"]["state_dict"])
-                stitching_model.l2_lambda = lam
-                train_stitching_layer_and_model2_part2(
-                    stitching_model, cifar10_data, trainer, num_epochs
+                stitching_model.load_state_dict(results["after_regression"]["state_dict"])
+                train_stitching_model_gradient_descent(
+                    stitching_model,
+                    cifar10_data,
+                    trainer,
+                    freeze_model1=True,
+                    freeze_model2=False,
+                    lambda_model2=lam,
                 )
                 results[key] = snapshot(stitching_model, cifar10_data, trainer)
                 torch.save(results, results_file)
@@ -215,7 +253,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--enable_learning",
-        type=bool,
+        action="store_true",
         default=False,
         help="Enable learning of the stitching layer and model 2 part 2",
     )
@@ -223,7 +261,7 @@ if __name__ == "__main__":
         "--lambda_model2",
         type=float,
         nargs="+",
-        required=True,
+        default=None,
         help="List of lambda values for regularization",
     )
     parser.add_argument(
@@ -233,6 +271,12 @@ if __name__ == "__main__":
         help="Device to train the model on. Use 'auto' for auto detection",
     )
     args = parser.parse_args()
+
+    if args.lambda_model2 is None:
+        assert not args.enable_learning, "Lambda values required for learning"
+
+    if args.enable_learning:
+        assert args.lambda_model2 is not None, "Lambda values required for learning"
 
     main(
         args.model1_name,
