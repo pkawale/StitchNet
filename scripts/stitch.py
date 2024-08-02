@@ -22,6 +22,7 @@ def save_loss(stitching_model, data_module, trainer):
 
 
 def snapshot(stitching_model, data_module, trainer) -> dict:
+    stitching_model.eval()
     return {
         "state_dict": stitching_model.state_dict(),
         "losses": save_loss(stitching_model, data_module, trainer),
@@ -36,6 +37,8 @@ def load_model(model_name, log_dir):
 
 
 def do_linear_regression(stitching_model, datamodule, device="cpu"):
+    # we are manually settings params; no need to track gradients or update BN
+    stitching_model.eval()
     train_loader = datamodule.train_dataloader()
     batch_im, _ = next(iter(train_loader))
     stitching_model.initialize_stitching_layer(batch_im.to(device))
@@ -61,12 +64,15 @@ def train_stitching_model_gradient_descent(
     freeze_model2=True,
     lambda_model2=np.inf,
 ):
+    stitching_model.train()
     prev_model1_state = {}
     if freeze_model1:
         # Freeze model1 parameters
         for name, param in stitching_model.part1_model1.named_parameters():
             prev_model1_state[name] = param.requires_grad
             param.requires_grad = False
+        stitching_model.part1_model1.eval()
+        stitching_model.part2_model1.eval()
 
     prev_model2_state = {}
     if freeze_model2:
@@ -76,16 +82,21 @@ def train_stitching_model_gradient_descent(
             param.requires_grad = False
         stitching_model.enable_learning = False
         stitching_model.l2_lambda = np.inf
+        stitching_model.part1_model2.eval()
+        stitching_model.part2_model2.eval()
     else:
         stitching_model.enable_learning = True
         stitching_model.l2_lambda = lambda_model2
         stitching_model.store_model2_parameters()
+        stitching_model.part1_model2.eval()
 
     # Sanity-check that stitching_model.configure_optimizers() returns an optimizer that
     # contains the parameters of the models that are supposed to be trained and no others.
     optimizer = stitching_model.configure_optimizers()
     assert all(
-        param.requires_grad for group in optimizer.param_groups for param in group['params']
+        param.requires_grad
+        for group in optimizer.param_groups
+        for param in group["params"]
     ), "Optimizer contains parameters that are not supposed to be trained"
 
     # Train whatever can be trained
@@ -115,11 +126,10 @@ def initialize_trainer(logger, num_epochs, devices="auto"):
         strategy=(
             DDPStrategy(find_unused_parameters=True)
             if torch.cuda.device_count() > 1
-            else None
+            else "auto"
         ),
         callbacks=[lr_monitor, early_stopping],
     )
-
 
 
 def main(
@@ -139,7 +149,7 @@ def main(
     trainer = initialize_trainer(logger, num_epochs, devices=devices)
 
     cifar10_data = CIFAR10Data(
-        data_dir=data_dir, batch_size=128, num_workers=32, pin_memory=True
+        data_dir=data_dir, batch_size=200, num_workers=32, pin_memory=True
     )
 
     cifar10_data.prepare_data()
@@ -194,7 +204,9 @@ def main(
         for lam in lambda_model2:
             key = f"after_training_model2_part2_stitching_{lam:.3f}"
             if key not in results:
-                stitching_model.load_state_dict(results["after_regression"]["state_dict"])
+                stitching_model.load_state_dict(
+                    results["after_regression"]["state_dict"]
+                )
                 train_stitching_model_gradient_descent(
                     stitching_model,
                     cifar10_data,

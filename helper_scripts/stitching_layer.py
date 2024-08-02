@@ -161,6 +161,10 @@ class StitchingModel(LightningModule):
     def regularization(self):
         l2_reg = torch.tensor(0.0).to(self.device)
         for name, param in self.part2_model2.named_parameters():
+            # Skip all batchnorm parameters; they change during training but not by gradient descent
+            # so we don't want to 'penalize' those changes in the logged loss values
+            if "bn" in name:
+                continue
             original_param_value = self.original_param_values[name]
             # Move original_param_value to the same device as param
             original_param_value = original_param_value.to(param.device)
