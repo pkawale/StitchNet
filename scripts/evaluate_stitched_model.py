@@ -1,195 +1,133 @@
 import argparse
-from pathlib import Path
 import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
-
-from helper_scripts.CIFAR10Module import CIFAR10Module
-from helper_scripts.stitching_layer import StitchingModel
-from helper_scripts.utils import find_checkpoint_for_model
-from helper_scripts.CIFAR10Data import CIFAR10Data
+from pathlib import Path
 
 
-def load_model(model_name, log_dir, device):
-    checkpoint_path = find_checkpoint_for_model(log_dir, model_name)
-    print(f"[INFO]: loading {model_name} from", checkpoint_path)
-    model = CIFAR10Module.load_from_checkpoint(checkpoint_path)
-    model.to(device)  # Move the model to the specified device
-    return model
+def load_results(results_file):
+    try:
+        results = torch.load(results_file, map_location="cpu")
+        return results
+    except FileNotFoundError:
+        print(f"[ERROR]: Results file not found: {results_file}")
+        return None
 
 
-def load_stitched_model(model1, model2, split1, split2, log_dir, device):
-    stitched_model = StitchingModel(model1, model2, split1, split2)
-    checkpoint_path = log_dir / "checkpoints" / f"results_{model1}_{model2}_{split1}_{split2}.pth"
-    results = torch.load(
-        checkpoint_path, map_location=device
-    )  # Ensure the loaded state_dict is on the correct device
-    if "after_training" not in results:
-        raise KeyError("The key 'after_training' is not found in the results file.")
+def plot_losses(results, output_dir):
+    stages = [key for key in results.keys()]
+    for stage in stages:
+        losses = results.get(stage, {}).get("losses")
+        if not losses:
+            print(f"[ERROR]: No losses found in {stage}")
+            continue
 
-    stitching_layer_state_dict = results["after_training"]["stitching_model_state_dict"]
-    stitched_model.stitching_layer.load_state_dict(stitching_layer_state_dict)
-    stitched_model.to(device)  # Move the stitched model to the specified device
-    return stitched_model, results
+        # Extract losses
+        resnet18_loss = losses["resnet18_loss"]
+        resnet34_loss = losses["resnet34_loss"]
+        stitching_model_loss = losses["stitching_model_loss"]
 
+        # Plotting losses
+        plt.figure()
+        stages = ["ResNet-18", "ResNet-34", "Stitching Model"]
+        loss_values = [resnet18_loss, resnet34_loss, stitching_model_loss]
 
-def calculate_metrics(model, dataloader, device):
-    model.eval()
-    criterion = torch.nn.CrossEntropyLoss()
-    total_loss = 0.0
-    total_correct = 0
-    total_samples = 0
-    batch_losses = []
-    with torch.no_grad():
-        for images, labels in dataloader:
-            images, labels = images.to(device), labels.to(device)
-            outputs = model(images)
-            loss = criterion(outputs, labels)
-            total_loss += loss.item() * images.size(0)
-            batch_losses.append(loss.item())
-            _, predicted = torch.max(outputs, 1)
-            total_correct += (predicted == labels).sum().item()
-            total_samples += images.size(0)
-    avg_loss = total_loss / total_samples
-    accuracy = total_correct / total_samples
-    return avg_loss, accuracy, batch_losses
+        plt.bar(stages, loss_values, color=["blue", "green", "red"])
+        plt.xlabel("Models")
+        plt.ylabel("Loss")
+        plt.title(f"Losses for {stage}")
+        plt.grid(True)
+        plt.savefig(output_dir / f"losses_{stage}.png")
+        plt.close()
+        print(f"[INFO]: Saved losses plot to {output_dir / f'losses_{stage}.png'}")
 
 
-def visualize_results(results,model_name, comparison_type="model1_vs_stitched"):
-    fig, ax = plt.subplots(2, 2, figsize=(14, 12))
+def plot_weight_diff_vs_loss(results, output_dir):
+    stages = [key for key in results.keys() if key.startswith("after_training_model2_part2_stitching")]
+    if not stages:
+        print("[ERROR]: No stages found for weight difference and loss plotting")
+        return
 
-    # Loss Comparison
-    ax[0, 0].bar(results["losses"].keys(), results["losses"].values())
-    ax[0, 0].set_title(f"Loss Comparison: {comparison_type}")
-    ax[0, 0].set_ylabel("Loss")
-    ax[0, 0].set_xlabel("Model")
+    weight_diffs = []
+    losses = []
+    lambda_values = []
 
-    # Accuracy Comparison
-    ax[0, 1].bar(
-        results["accuracies"].keys(), results["accuracies"].values(), color="orange"
-    )
-    ax[0, 1].set_title(f"Accuracy Comparison: {comparison_type}")
-    ax[0, 1].set_ylabel("Accuracy")
-    ax[0, 1].set_xlabel("Model")
+    for stage in stages:
+        losses_dict = results[stage].get("losses")
+        if not losses_dict:
+            continue
 
-    # Heatmap of Stitching Layer Weights
-    conv_weights = (
-        results["after_training"]["stitching_model_state_dict"]["conv.weight"]
-        .cpu()
-        .numpy()
-    )
-    sns.heatmap(
-        conv_weights.reshape(-1, conv_weights.shape[-1]), cmap="viridis", ax=ax[1, 0]
-    )
-    ax[1, 0].set_title("Stitching Layer Weights")
+        stitching_model_loss = losses_dict["stitching_model_loss"]
 
-    # Batch-wise Loss Comparison
-    ax[1, 1].plot(
-        results["batch_losses"][f"{model_name}"], label=f"{model_name} Loss", linestyle="--"
-    )
-    ax[1, 1].plot(
-        results["batch_losses"]["stitched_model"],
-        label="Stitched Model Loss",
-        linestyle="-",
-    )
-    ax[1, 1].set_title("Batch-wise Loss Comparison")
-    ax[1, 1].set_ylabel("Loss")
-    ax[1, 1].set_xlabel("Batch")
-    ax[1, 1].legend()
+        init_weights = results["init"]["state_dict"]
+        final_weights = results[stage]["state_dict"]
 
-    plt.tight_layout()
-    plt.show()
+        model2_weight_diff = 0
+        for key in final_weights.keys():
+            if key.startswith("part2_model2") and torch.is_floating_point(final_weights[key]):
+                model2_weight_diff += torch.norm(final_weights[key].float() - init_weights[key].float()).item()
+
+        lambda_value = float(stage.split("_")[-1])
+        regularizer = lambda_value * model2_weight_diff
+        total_loss = stitching_model_loss + regularizer
+
+        weight_diffs.append(model2_weight_diff)
+        losses.append(total_loss)
+        lambda_values.append(lambda_value)
+
+    plt.figure()
+    plt.scatter(weight_diffs, losses, c=lambda_values, cmap='viridis', label="Loss vs Weight Difference")
+    plt.colorbar(label='Lambda Value')
+    plt.xlabel("Weight Difference")
+    plt.ylabel("Total Loss (Loss + Regularizer)")
+    plt.title("Weight Difference vs Loss with Regularizer")
+    plt.grid(True)
+    plt.savefig(output_dir / "weight_diff_vs_loss.png")
+    plt.close()
+    print(f"[INFO]: Saved weight difference vs loss plot to {output_dir / 'weight_diff_vs_loss.png'}")
 
 
-def main(model1_name, model2_name, split1, split2, log_dir, data_dir):
-    results = {"losses": {}, "accuracies": {}, "batch_losses": {}}
+def plot_weights(results, output_dir):
+    init_state_dict = results.get("init", {}).get("state_dict")
+    if not init_state_dict:
+        print("[ERROR]: No initial state dict found in results")
+        return
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    conv_weights = init_state_dict.get("stitching_layer.conv.weight")
+    if conv_weights is None:
+        print("[ERROR]: No convolution weights found in initial state dict")
+        return
 
-    model1 = load_model(model1_name, log_dir, device)
-    model2 = load_model(model2_name, log_dir, device)
-    stitched_model, results_data = load_stitched_model(
-        model1, model2, split1, split2, log_dir, device
-    )
+    conv_weights_reshaped = conv_weights.view(conv_weights.size(0), -1).numpy()
 
-    cifar10_data = CIFAR10Data(
-        data_dir=data_dir, batch_size=32, num_workers=4, pin_memory=True
-    )
-    cifar10_data.prepare_data()
-    cifar10_data.setup(stage="test")
-    test_loader = cifar10_data.test_dataloader()
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(conv_weights_reshaped, cmap="viridis")
+    plt.xlabel("Weights")
+    plt.ylabel("Filters")
+    plt.title("Stitching Layer Weights")
+    plt.savefig(output_dir / "stitching_layer_weights.png")
+    plt.close()
+    print(f"[INFO]: Saved stitching layer weights plot to {output_dir / 'stitching_layer_weights.png'}")
 
-    # Model 1 vs Stitched Model
-    model1_loss, model1_accuracy, model1_batch_losses = calculate_metrics(
-        model1, test_loader, device
-    )
-    stitched_model_loss, stitched_model_accuracy, stitched_model_batch_losses = (
-        calculate_metrics(stitched_model, test_loader, device)
-    )
 
-    results["losses"][f"{model1_name}_loss"] = model1_loss
-    results["losses"]["stitched_model_loss"] = stitched_model_loss
-    results["accuracies"][f"{model1_name}_accuracy"] = model1_accuracy
-    results["accuracies"]["stitched_model_accuracy"] = stitched_model_accuracy
-    results["batch_losses"][f"{model1_name}"] = model1_batch_losses
-    results["batch_losses"]["stitched_model"] = stitched_model_batch_losses
-    results["after_training"] = results_data["after_training"]
+def main(results_file, output_dir):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results = load_results(results_file)
+    if results is None:
+        return
 
-    # visualize_results(results, model1_name, comparison_type=f"{model1_name}_vs_stitched")
-
-    # Model 2 vs Stitched Model
-    model2_loss, model2_accuracy, model2_batch_losses = calculate_metrics(
-        model2, test_loader, device
-    )
-
-    results["losses"][f"{model2_name}_loss"] = model2_loss
-    results["accuracies"][f"{model2_name}_accuracy"] = model2_accuracy
-    results["batch_losses"][f"{model2_name}"] = model2_batch_losses
-
-    # temporary update to add logs in stitch.py first
-    visualize_results(results, model2_name, comparison_type=f"{model1_name}_vs_{model2_name}_vs_stitched")
+    plot_losses(results, output_dir)
+    plot_weights(results, output_dir)
+    plot_weight_diff_vs_loss(results, output_dir)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate Stitched Model")
+    parser = argparse.ArgumentParser(description="Visualization Script for Stitching Model Results")
     parser.add_argument(
-        "--model1_name", type=str, required=True, help="Name of the first model"
+        "--results_file", type=Path, required=True, help="Path to the results file"
     )
     parser.add_argument(
-        "--model2_name", type=str, required=True, help="Name of the second model"
-    )
-    parser.add_argument(
-        "--index1",
-        type=int,
-        required=True,
-        help="Split Index of the layer in the first model",
-    )
-    parser.add_argument(
-        "--index2",
-        type=int,
-        required=True,
-        help="Split Index of the layer in the second model",
-    )
-    parser.add_argument(
-        "--log_dir",
-        type=Path,
-        required=True,
-        help="Directory to load logs and checkpoints",
-    )
-
-    parser.add_argument(
-        "--data_dir",
-        type=Path,
-        required=True,
-        help="Directory to load data",
+        "--output_dir", type=Path, required=True, help="Directory to save visualizations"
     )
     args = parser.parse_args()
-
-    main(
-        args.model1_name,
-        args.model2_name,
-        args.index1,
-        args.index2,
-        args.log_dir,
-        args.data_dir
-    )
+    main(args.results_file, args.output_dir)

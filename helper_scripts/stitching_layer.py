@@ -236,10 +236,6 @@ class LitSequential(LightningModule):
 class StitchingLayer(nn.Module):
     def __init__(self, in_channels, out_channels, in_shape, out_shape):
         super(StitchingLayer, self).__init__()
-        # print("in channels", in_channels)
-        # print("out channels", out_channels)
-        # print("In shape", in_shape)
-        # print("Out shape", out_shape)
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
         # Store the target spatial dimensions
         self.target_size = out_shape[2:]

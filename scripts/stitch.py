@@ -61,7 +61,6 @@ def train_stitching_model_gradient_descent(
     freeze_model2=True,
     lambda_model2=np.inf,
 ):
-    # TODO - use a context manager to freeze and unfreeze the models
     prev_model1_state = {}
     if freeze_model1:
         # Freeze model1 parameters
@@ -78,14 +77,16 @@ def train_stitching_model_gradient_descent(
         stitching_model.enable_learning = False
         stitching_model.l2_lambda = np.inf
     else:
-        # TODO - refactor to avoid awkward dependency here where caller needs to set flags *and*
-        #  freeze/unfreeze the model
         stitching_model.enable_learning = True
         stitching_model.l2_lambda = lambda_model2
         stitching_model.store_model2_parameters()
 
-    # TODO - sanity-check that stitching_model.configure_optimizers() returns an optimizer that
-    #  contains the parameters of the models that are supposed to be trained and no others.
+    # Sanity-check that stitching_model.configure_optimizers() returns an optimizer that
+    # contains the parameters of the models that are supposed to be trained and no others.
+    optimizer = stitching_model.configure_optimizers()
+    assert all(
+        param.requires_grad for group in optimizer.param_groups for param in group['params']
+    ), "Optimizer contains parameters that are not supposed to be trained"
 
     # Train whatever can be trained
     trainer.fit(stitching_model, datamodule=datamodule)
@@ -120,6 +121,7 @@ def initialize_trainer(logger, num_epochs, devices="auto"):
     )
 
 
+
 def main(
     model1_name,
     model2_name,
@@ -129,7 +131,7 @@ def main(
     data_dir,
     num_epochs,
     enable_learning,
-    lambda_model2: list[float],
+    lambda_model2,
     devices,
 ):
     log_dir.mkdir(exist_ok=True, parents=True)
@@ -139,6 +141,7 @@ def main(
     cifar10_data = CIFAR10Data(
         data_dir=data_dir, batch_size=128, num_workers=32, pin_memory=True
     )
+
     cifar10_data.prepare_data()
     cifar10_data.setup(stage="fit")
 
@@ -191,7 +194,6 @@ def main(
         for lam in lambda_model2:
             key = f"after_training_model2_part2_stitching_{lam:.3f}"
             if key not in results:
-                # Train the stitching layer and the second part of model2
                 stitching_model.load_state_dict(results["after_regression"]["state_dict"])
                 train_stitching_model_gradient_descent(
                     stitching_model,
@@ -204,18 +206,20 @@ def main(
                 results[key] = snapshot(stitching_model, cifar10_data, trainer)
                 torch.save(results, results_file)
 
-    # Log model architecture
-    batch = next(iter(cifar10_data.train_dataloader()))[0].to(
-        next(stitching_model.parameters()).device
-    )
-    logger.experiment.add_graph(stitching_model, batch)
-
-    # Reshape weights for embedding
-    conv_weights = stitching_model.stitching_layer.conv.weight.data
-    conv_weights_reshaped = conv_weights.view(conv_weights.size(0), -1)
-    logger.experiment.add_embedding(
-        conv_weights_reshaped, metadata=None, label_img=None
-    )
+    # # Log model architecture
+    # stitching_model.eval()
+    # batch = next(iter(cifar10_data.train_dataloader()))[0].to(
+    #     next(stitching_model.parameters()).device
+    # )
+    # logger.experiment.add_graph(stitching_model, batch)
+    #
+    # # Reshape weights for embedding
+    # conv_weights = stitching_model.stitching_layer.conv.weight.data
+    # conv_weights_reshaped = conv_weights.view(conv_weights.size(0), -1)
+    # logger.experiment.add_embedding(
+    #     conv_weights_reshaped, metadata=None, label_img=None
+    # )
+    print("[INFO]: Value of results is ", results)
 
 
 if __name__ == "__main__":
