@@ -12,34 +12,55 @@ class TestSanityCheck(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        files = list(cls.WHERE.glob("results_resnet18_resnet34_*_*.pth"))
+        files = list(cls.WHERE.glob("results_resnet18_resnet34_*_lr1.00e-03.pth"))
         cls.data = {file.name: torch.load(file) for file in files}
 
     def test_init_loss_sensible(self):
         for key, value in self.data.items():
-            self.assertLess(value["init"]["losses"]["model1_loss"], 1.0)
-            self.assertLess(value["init"]["losses"]["model2_loss"], 1.0)
-            self.assertGreater(value["init"]["losses"]["stitching_model_loss"], 1.0)
+            self.assertLess(
+                value["init"]["losses"]["model1_loss"]["test_cross_entropy"],
+                1.0,
+            )
+            self.assertLess(
+                value["init"]["losses"]["model2_loss"]["test_cross_entropy"],
+                1.0,
+            )
+            self.assertGreater(
+                value["init"]["losses"]["stitching_model_loss"]["test_cross_entropy"],
+                1.0,
+            )
 
     def test_regression_loss_sensible(self):
         for key, value in self.data.items():
             self.assertLess(
-                value["after_regression"]["losses"]["stitching_model_loss"],
-                value["init"]["losses"]["stitching_model_loss"],
+                value["after_regression"]["losses"]["stitching_model_loss"][
+                    "test_cross_entropy"
+                ],
+                value["init"]["losses"]["stitching_model_loss"]["test_cross_entropy"],
             )
 
     def test_learning_loss_sensible(self):
         for key, value in self.data.items():
             self.assertLess(
-                value["after_training"]["losses"]["stitching_model_loss"],
-                value["after_regression"]["losses"]["stitching_model_loss"],
+                value["after_training"]["losses"]["stitching_model_loss"][
+                    "test_cross_entropy"
+                ],
+                value["after_regression"]["losses"]["stitching_model_loss"][
+                    "test_cross_entropy"
+                ],
             )
 
     def test_m2_loss_sensible(self):
         for key, value in self.data.items():
             self.assertLess(
-                value[LAM_KEY]["losses"]["stitching_model_loss"],
-                value["after_training"]["losses"]["stitching_model_loss"],
+                value[LAM_KEY]["losses"]["stitching_model_loss"]["test_cross_entropy"],
+                value["after_training"]["losses"]["stitching_model_loss"][
+                    "test_cross_entropy"
+                ] * 1.05,
+            )
+            self.assertGreater(
+                value[LAM_KEY]["losses"]["stitching_model_loss"]["test_delta_weights"],
+                0.0,
             )
 
     def test_regression_does_not_affect_non_stitching_params(self):

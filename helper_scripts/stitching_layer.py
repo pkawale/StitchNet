@@ -226,15 +226,17 @@ class LitSequential(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        stats = {"val_loss": F.cross_entropy(self(x), y)}
+        stats = {"val_cross_entropy": F.cross_entropy(self(x), y)}
+        stats["val_loss"] = stats["val_cross_entropy"]
         self.log_dict(stats)
-        return stats["val_loss"]
+        return stats["val_cross_entropy"]
 
     def test_step(self, batch, batch_idx):
         x, y = batch
-        stats = {"test_loss": F.cross_entropy(self(x), y)}
+        stats = {"test_cross_entropy": F.cross_entropy(self(x), y)}
+        stats["test_loss"] = stats["test_cross_entropy"]
         self.log_dict(stats)
-        return stats["test_loss"]
+        return stats["test_cross_entropy"]
 
 
 class StitchingLayer(nn.Module):

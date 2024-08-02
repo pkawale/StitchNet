@@ -47,13 +47,7 @@ def do_linear_regression(stitching_model, datamodule, device="cpu"):
 def test_model(model, datamodule, trainer):
     test_results = trainer.test(model, datamodule=datamodule, verbose=False)
     print(f"Test results for {model.__class__.__name__}: {test_results}")
-    # Assuming the default key for loss in the test results is 'test_loss'
-    # Find the key containing the loss
-    possible_keys = ["test_loss_epoch", "loss", "test_loss"]
-    for key in possible_keys:
-        if key in test_results[0]:
-            return test_results[0][key]
-    raise KeyError("No recognized loss key found in test results")
+    return test_results[0]
 
 
 def train_stitching_model_gradient_descent(
@@ -113,11 +107,13 @@ def train_stitching_model_gradient_descent(
             param.requires_grad = prev_model2_state[name]
 
 
-def initialize_trainer(logger, num_epochs, devices="auto"):
+def initialize_trainer(run_name, num_epochs, devices="auto"):
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
     early_stopping = EarlyStopping(
         monitor="val_loss", patience=10, verbose=True, mode="min"
     )
+
+    logger = TensorBoardLogger("lightning_logs", name=run_name)
 
     return pl.Trainer(
         max_epochs=num_epochs,
@@ -142,11 +138,12 @@ def main(
     num_epochs,
     enable_learning,
     lambda_model2,
+    lr,
     devices,
 ):
+    run_key = f"{model1_name}_{model2_name}_{split1}_{split2}_lr{lr:.2e}"
     log_dir.mkdir(exist_ok=True, parents=True)
-    logger = TensorBoardLogger("lightning_logs")
-    trainer = initialize_trainer(logger, num_epochs, devices=devices)
+    trainer = initialize_trainer(f"{run_key}_eval", num_epochs, devices=devices)
 
     cifar10_data = CIFAR10Data(
         data_dir=data_dir, batch_size=200, num_workers=32, pin_memory=True
@@ -162,14 +159,12 @@ def main(
         model2.model,
         split1,
         split2,
-        learning_rate=1e-3,
+        learning_rate=lr,
     )
 
     analysis_dir = Path(log_dir) / "analysis"
     analysis_dir.mkdir(exist_ok=True)
-    results_file = (
-        analysis_dir / f"results_{model1_name}_{model2_name}_{split1}_{split2}.pth"
-    )
+    results_file = analysis_dir / f"results_{run_key}.pth"
 
     try:
         results = torch.load(results_file, map_location="cpu")
@@ -189,6 +184,7 @@ def main(
 
     if "after_training" not in results:
         stitching_model.load_state_dict(results["after_regression"]["state_dict"])
+        trainer = initialize_trainer(f"{run_key}_m1", num_epochs, devices=devices)
         train_stitching_model_gradient_descent(
             stitching_model,
             cifar10_data,
@@ -206,6 +202,9 @@ def main(
             if key not in results:
                 stitching_model.load_state_dict(
                     results["after_regression"]["state_dict"]
+                )
+                trainer = initialize_trainer(
+                    f"{run_key}_m2_{lam:.3f}", num_epochs, devices=devices
                 )
                 train_stitching_model_gradient_descent(
                     stitching_model,
@@ -283,6 +282,12 @@ if __name__ == "__main__":
         help="List of lambda values for regularization",
     )
     parser.add_argument(
+        "--lr",
+        type=float,
+        default=1e-3,
+        help="Learning rate",
+    )
+    parser.add_argument(
         "--devices",
         type=str,
         default="auto",
@@ -311,5 +316,6 @@ if __name__ == "__main__":
         args.num_epochs,
         args.enable_learning,
         args.lambda_model2,
+        args.lr,
         args.devices,
     )
